@@ -1,352 +1,238 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/Header";
 import SearchBar from "@/components/SearchBar";
 import MenuCard from "@/components/MenuCard";
 import CartDrawer from "@/components/CartDrawer";
 import OrderSuccess from "@/components/OrderSuccess";
 import AdminPortal from "@/components/AdminPortal";
-import { menuItems as initialMenuItems, categories, categoryIcons, SUGAR_FREE_BLACKLIST } from "@/data/menuItems";
+import { supabase } from "../lib/supabase"; 
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { Lock, X, KeyRound } from "lucide-react";
-
-// --- Global Types ---
-export type OrderStatus = "sent" | "preparing" | "ready";
-
-interface CartStateItem {
-  quantity: number;
-  instructions: string;
-}
-
-interface Order {
-  id: string;
-  customerName: string;
-  status: OrderStatus;
-  items: any[];
-  total: number;
-  timestamp: Date;
-}
 
 const Index = () => {
-  // --- View State ---
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
+  // --- 1. DATABASE STATE ---
+  const [menuData, setMenuData] = useState<any[]>([]); 
+  const [liveOrders, setLiveOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // --- Auth State ---
+  // --- 2. UI & AUTH STATE ---
+  const [showAdmin, setShowAdmin] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [adminPin, setAdminPin] = useState("");
-
-  // --- Shop State ---
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sugarFreeOnly, setSugarFreeOnly] = useState(false);
-  const [cart, setCart] = useState<Record<string, CartStateItem>>({});
+  
+  // Cart State
+  const [cart, setCart] = useState<Record<string, any>>({});
   const [cartOpen, setCartOpen] = useState(false);
 
-  // --- MENU DATA (Persisted) ---
-  const [menuData, setMenuData] = useState(() => {
-    if (typeof window !== "undefined") {
-      const savedMenu = localStorage.getItem("cravin-menu-data");
-      if (savedMenu) return JSON.parse(savedMenu);
+  // --- 3. DATA FETCHING LOGIC ---
+  const fetchMenu = async () => {
+    const { data } = await supabase
+      .from('menu_items')
+      .select('*')
+      .order('category', { ascending: true });
+    
+    if (data) setMenuData(data);
+  };
+
+  const fetchOrders = async () => {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, order_items(*)')
+      .eq('is_archived', false) // Only active orders
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      // Prevents UI flickering by checking if data actually changed
+      setLiveOrders(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
     }
-    return initialMenuItems.map(item => ({ ...item, available: true }));
-  });
+    setLoading(false);
+  };
 
+  // --- 4. THE SYNC SYSTEM (Real-time + Safety Polling) ---
   useEffect(() => {
-    localStorage.setItem("cravin-menu-data", JSON.stringify(menuData));
-  }, [menuData]);
+    fetchMenu();
+    fetchOrders();
 
-  // --- LIVE ORDERS (Persisted) ---
-  const [liveOrders, setLiveOrders] = useState<Order[]>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("cravin-live-orders");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          return parsed.map((o: any) => ({ ...o, timestamp: new Date(o.timestamp) }));
-        } catch (e) {
-          console.error("Failed to parse orders", e);
+    // Layer 1: Real-time Listener (The "Ting" Sound)
+    const channel = supabase
+      .channel('live-updates')
+      .on(
+        'postgres_changes', 
+        { event: '*', schema: 'public', table: 'orders' }, 
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            new Audio("https://assets.mixkit.co/sfx/preview/mixkit-positive-notification-951.mp3").play().catch(() => {});
+          }
+          fetchOrders(); 
         }
-      }
-    }
-    return [];
-  });
+      )
+      .on(
+        'postgres_changes', 
+        { event: '*', schema: 'public', table: 'menu_items' }, 
+        fetchMenu
+      )
+      .subscribe();
 
-  // Sync Orders to LocalStorage
-  useEffect(() => {
-    const stringifiedState = JSON.stringify(liveOrders);
-    const currentStorage = localStorage.getItem("cravin-live-orders");
-    if (stringifiedState !== currentStorage) {
-      localStorage.setItem("cravin-live-orders", stringifiedState);
-    }
-  }, [liveOrders]);
+    // Layer 2: Aggressive Polling Safety Net
+    // Force-refreshes every 2 seconds in case the network blocks WebSockets
+    const interval = setInterval(fetchOrders, 2000); 
 
-  // Sync across tabs
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "cravin-live-orders" && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          setLiveOrders(parsed.map((o: any) => ({ ...o, timestamp: new Date(o.timestamp) })));
-        } catch (error) { console.error("Sync error", error); }
-      }
+    return () => { 
+      supabase.removeChannel(channel); 
+      clearInterval(interval); 
     };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  // --- SOUND NOTIFICATION SYSTEM ---
-  const prevOrderCount = useRef(liveOrders.length);
-
-  useEffect(() => {
-    // Only play sound if order count INCREASES (New Order)
-    if (liveOrders.length > prevOrderCount.current) {
-      // "Ting" Sound Effect
-      const audio = new Audio("https://assets.mixkit.co/sfx/preview/mixkit-positive-notification-951.mp3");
-      audio.play().catch(e => console.log("Audio prevented:", e));
-      
-      toast({ 
-        title: "New Order!", 
-        description: "Kitchen has been notified.",
-        className: "bg-emerald-500 text-white border-none"
-      });
-    }
-    prevOrderCount.current = liveOrders.length;
-  }, [liveOrders]);
-
-  // --- Logic ---
+  // --- 5. CART CALCULATIONS ---
   const cartItems = useMemo(() => {
     return Object.entries(cart).map(([key, data]) => {
-      const [idStr, isSugarFreeStr] = key.split("-");
-      const itemData = menuData.find((m: any) => m.id === Number(idStr));
-      
-      if (!itemData) return undefined;
+      // Correctly splits IDs (works for both Numbers and UUIDs)
+      const lastDashIndex = key.lastIndexOf("-");
+      const id = key.substring(0, lastDashIndex);
+      const isSugarFree = key.substring(lastDashIndex + 1) === "true";
 
-      return {
-        uniqueKey: key,
-        item: itemData, 
-        quantity: data.quantity,
-        instructions: data.instructions,
-        isSugarFree: isSugarFreeStr === "true",
+      const item = menuData.find((m: any) => String(m.id) === String(id));
+      if (!item) return null;
+
+      return { 
+        uniqueKey: key, 
+        item, 
+        quantity: data.quantity, 
+        instructions: data.instructions || "", 
+        isSugarFree 
       };
-    }).filter(ci => ci !== undefined);
+    }).filter((i): i is any => i !== null);
   }, [cart, menuData]);
 
-  const cartCount = useMemo(() => cartItems.reduce((s, ci: any) => s + ci.quantity, 0), [cartItems]);
-  const totalAmount = useMemo(() => cartItems.reduce((s, ci: any) => s + ci.item.price * ci.quantity, 0), [cartItems]);
+  const totalAmount = useMemo(() => cartItems.reduce((s, ci) => s + (ci.item.price * ci.quantity), 0), [cartItems]);
 
-  // --- Handlers ---
-  const addToCart = useCallback((id: number, sugarFree: boolean) => {
-    const key = `${id}-${sugarFree}`;
-    setCart(prev => ({ ...prev, [key]: { quantity: (prev[key]?.quantity || 0) + 1, instructions: prev[key]?.instructions || "" } }));
-  }, []);
+  // --- 6. ACTION HANDLERS ---
+  const addToCart = (id: any, sf: boolean) => {
+    const key = `${id}-${sf}`;
+    setCart(prev => ({ ...prev, [key]: { ...prev[key], quantity: (prev[key]?.quantity || 0) + 1 } }));
+  };
 
-  const removeFromCart = useCallback((id: number, sugarFree: boolean) => {
-    const key = `${id}-${sugarFree}`;
+  const removeFromCart = (id: any, sf: boolean) => {
+    const key = `${id}-${sf}`;
     setCart(prev => {
-      const next = { ...prev };
-      if (next[key]?.quantity > 1) next[key].quantity -= 1;
-      else delete next[key];
-      return next;
+      if (!prev[key] || prev[key].quantity <= 1) {
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: { ...prev[key], quantity: prev[key].quantity - 1 } };
     });
-  }, []);
+  };
 
-  const updateItemInstructions = useCallback((key: string, val: string) => {
-    setCart(prev => ({ ...prev, [key]: { ...prev[key], instructions: val } }));
-  }, []);
+  const handlePlaceOrder = async (name: string) => {
+    const { data: order, error } = await supabase
+      .from('orders')
+      .insert([{ customer_name: name, total_amount: totalAmount, status: 'sent', is_archived: false }])
+      .select()
+      .single();
 
-  const handlePlaceOrder = (name: string) => {
-    const newOrder: Order = {
-      id: `ORD-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
-      customerName: name, status: "sent", items: cartItems, total: totalAmount, timestamp: new Date(),
-    };
-    // Updating liveOrders triggers the useEffect above, which plays the sound!
-    setLiveOrders(prev => [newOrder, ...prev]);
-    setCurrentOrderId(newOrder.id);
+    if (error) return toast({ title: "Order Failed", description: error.message, variant: "destructive" });
+
+    const items = cartItems.map(ci => ({
+      order_id: order.id,
+      menu_item_id: ci.item.id,
+      item_name: ci.item.name,
+      quantity: ci.quantity,
+      is_sugar_free: ci.isSugarFree,
+      price_at_time_of_order: ci.item.price
+    }));
+
+    await supabase.from('order_items').insert(items);
+    
+    setCurrentOrderId(order.id);
     setCart({});
     setCartOpen(false);
+    fetchOrders();
   };
 
-  const updateOrderStatus = (id: string, status: OrderStatus) => {
-    setLiveOrders(prev => prev.map(o => (o.id === id ? { ...o, status } : o)));
-  };
-
-  const requestDelete = (id: string) => {
-    setLiveOrders(prev => prev.filter(o => o.id !== id));
-    toast({ title: "Order Deleted", variant: "destructive" });
-  };
-
-  const handleResetSystem = () => {
-    setLiveOrders([]);
-    localStorage.removeItem("cravin-live-orders");
-    toast({ title: "System Reset", description: "Ready for a new day!" });
-  };
-
-  // --- ADMIN AUTH HANDLER ---
-  const handleAdminLogin = () => {
-    if (adminPin === "chai123") {
-      setShowAdmin(true);
-      setShowAuthModal(false);
-      setAdminPin(""); // Clear pin
-      toast({ title: "Welcome back, Chef!", description: "Admin mode unlocked." });
-    } else {
-      toast({ title: "Access Denied", description: "Incorrect PIN.", variant: "destructive" });
-      setAdminPin("");
-    }
-  };
-
-  // --- RENDER ---
-
-  // 1. ADMIN VIEW
+  // --- 7. RENDER LOGIC ---
   if (showAdmin) {
     return (
       <AdminPortal 
-        orders={liveOrders}
-        menuItems={menuData}
-        onUpdateStatus={updateOrderStatus} 
-        onDelete={requestDelete} 
-        onUpdateMenu={setMenuData}
-        onBack={() => setShowAdmin(false)} // Go back to Customer View
-        onResetSystem={handleResetSystem}
+        orders={liveOrders} 
+        menuItems={menuData} 
+        onUpdateStatus={async (id, s) => { await supabase.from('orders').update({ status: s }).eq('id', id); fetchOrders(); }} 
+        onDelete={async (id) => { await supabase.from('orders').delete().eq('id', id); fetchOrders(); }} 
+        onUpdateMenu={fetchMenu} 
+        onBack={() => setShowAdmin(false)} 
+        onResetSystem={async () => { await supabase.from('orders').update({ is_archived: true }).eq('is_archived', false); fetchOrders(); }} 
       />
     );
   }
 
-  // 2. ORDER SUCCESS VIEW
   if (currentOrderId) {
-    const activeOrder = liveOrders.find(o => o.id === currentOrderId);
-    if (!activeOrder) { setCurrentOrderId(null); return null; }
-    
-    return (
-      <OrderSuccess 
-        name={activeOrder.customerName} 
-        status={activeOrder.status} 
-        onNewOrder={() => setCurrentOrderId(null)} 
-      />
-    );
+    const order = liveOrders.find(o => o.id === currentOrderId);
+    return <OrderSuccess name={order?.customer_name || "Guest"} status={order?.status || 'sent'} onNewOrder={() => setCurrentOrderId(null)} />;
   }
 
-  // 3. MAIN CUSTOMER VIEW
   return (
-    <div className={cn("min-h-screen pb-24 transition-colors duration-500", sugarFreeOnly ? "bg-emerald-50/40" : "bg-background")}>
+    <div className={cn("min-h-screen pb-32 transition-colors duration-500", sugarFreeOnly ? "bg-emerald-50" : "bg-slate-50")}>
       
-      {/* Header with Double-Tap Secret Trigger */}
-      <div onDoubleClick={() => setShowAuthModal(true)} className="cursor-pointer select-none">
-        <Header cartCount={cartCount} onCartClick={() => setCartOpen(true)} />
+      <div onDoubleClick={() => setShowAuthModal(true)} className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 shadow-sm">
+        <Header cartCount={cartItems.length} onCartClick={() => setCartOpen(true)} />
+        <div className="px-4 pb-4">
+          <SearchBar value={search} onChange={setSearch} sugarFreeOnly={sugarFreeOnly} onSugarFreeToggle={setSugarFreeOnly} />
+        </div>
       </div>
-
-      <SearchBar 
-        value={search} 
-        onChange={setSearch} 
-        sugarFreeOnly={sugarFreeOnly} 
-        onSugarFreeToggle={(val) => {
-           const hasSweets = cartItems.some((ci: any) => SUGAR_FREE_BLACKLIST.includes(ci.item.name));
-           if (val && hasSweets) toast({ title: "Clear Sweets First", description: "Remove sugary items first.", variant: "destructive" });
-           else setSugarFreeOnly(val);
-        }} 
-      />
-
-      <main className="container mx-auto px-4 py-8">
-        {categories.map((cat) => {
-          const items = menuData.filter((i: any) => 
-            i.category === cat && 
-            i.available && 
-            (!sugarFreeOnly || !SUGAR_FREE_BLACKLIST.includes(i.name)) &&
-            i.name.toLowerCase().includes(search.toLowerCase())
-          );
-
-          if (items.length === 0) return null;
-
-          return (
-            <section key={cat} className="mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <h2 className="mb-5 flex items-center gap-3 text-2xl font-black text-slate-800">
-                <span className="text-3xl">{categoryIcons[cat]}</span> {cat}
-              </h2>
-              <div className="grid gap-4">
-                {items.map((item: any) => (
-                  <MenuCard
-                    key={item.id}
-                    item={item}
-                    quantity={cart[`${item.id}-${sugarFreeOnly}`]?.quantity || 0}
-                    onAdd={() => addToCart(item.id, sugarFreeOnly)}
-                    onRemove={() => removeFromCart(item.id, sugarFreeOnly)}
-                    sugarFreeMode={sugarFreeOnly}
+      
+      <main className="p-4 container mx-auto max-w-2xl">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+            <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin mb-4" />
+            <p className="font-bold uppercase tracking-widest text-xs">Loading Menu...</p>
+          </div>
+        ) : (
+          Array.from(new Set(menuData.map(i => i.category))).map(cat => (
+            <section key={cat} className="mb-6">
+              <h2 className="text-lg font-black mb-3 text-slate-800 uppercase tracking-tight pl-1">{cat}</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {menuData.filter(i => i.category === cat && (i.name?.toLowerCase().includes(search.toLowerCase()) ?? true)).map(item => (
+                  <MenuCard 
+                    key={item.id} 
+                    item={item} 
+                    quantity={cart[`${item.id}-${sugarFreeOnly}`]?.quantity || 0} 
+                    onAdd={() => addToCart(item.id, sugarFreeOnly)} 
+                    onRemove={() => removeFromCart(item.id, sugarFreeOnly)} 
+                    sugarFreeMode={sugarFreeOnly} 
                   />
                 ))}
               </div>
             </section>
-          );
-        })}
+          ))
+        )}
       </main>
 
-      {/* Floating Cart Button */}
-      {cartCount > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 p-6 flex justify-center animate-in slide-in-from-bottom-10 duration-500">
-          <button 
-            onClick={() => setCartOpen(true)} 
-            className={cn("w-full max-w-lg rounded-[2.5rem] py-5 text-xl font-black shadow-2xl transition-all active:scale-95 flex items-center justify-between px-10 border-4 border-white", sugarFreeOnly ? "bg-emerald-600 text-white shadow-emerald-200" : "bg-slate-900 text-white shadow-slate-300")}
-          >
-            <span>View Cart ({cartCount})</span><span>₹{totalAmount}</span>
+      {cartItems.length > 0 && (
+        <div className="fixed bottom-6 inset-x-4 z-40 md:inset-x-auto md:right-8 md:w-96">
+          <button onClick={() => setCartOpen(true)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-2xl active:scale-95 transition-transform flex items-center justify-between px-6">
+            <span className="flex items-center gap-2">
+              <span className="bg-white text-slate-900 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{cartItems.length}</span>
+              Items
+            </span>
+            <span>View Cart • ₹{totalAmount}</span>
           </button>
         </div>
       )}
 
-      <CartDrawer 
-        open={cartOpen} 
-        onClose={() => setCartOpen(false)} 
-        cartItems={cartItems} 
-        onAdd={addToCart} 
-        onRemove={removeFromCart} 
-        onUpdateItemInstructions={updateItemInstructions} 
-        onPlaceOrder={handlePlaceOrder} 
-        sugarFreeMode={sugarFreeOnly} 
-      />
+      <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} cartItems={cartItems} onAdd={addToCart} onRemove={removeFromCart} onUpdateItemInstructions={() => {}} onPlaceOrder={handlePlaceOrder} sugarFreeMode={sugarFreeOnly} />
 
-      {/* --- PIN AUTH MODAL --- */}
       {showAuthModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-xs bg-white rounded-3xl p-8 shadow-2xl border border-white/20">
-            
-            {/* Modal Header */}
-            <div className="flex justify-between items-start mb-8">
-              <div className="flex items-center gap-3">
-                <div className="bg-slate-100 p-3 rounded-full text-slate-900">
-                  <Lock className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">Admin Access</h3>
-                  <p className="text-xs text-slate-500 font-medium">Enter security PIN</p>
-                </div>
-              </div>
-              <button onClick={() => setShowAuthModal(false)} className="text-slate-300 hover:text-slate-500 transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            {/* Input Field */}
-            <div className="relative mb-6 group">
-              <KeyRound className="absolute left-4 top-3.5 w-5 h-5 text-slate-400 group-focus-within:text-emerald-500 transition-colors" />
-              <input 
-                type="password" 
-                value={adminPin}
-                onChange={(e) => setAdminPin(e.target.value)}
-                placeholder="PIN"
-                autoFocus
-                className="w-full bg-slate-50 text-center text-xl font-bold tracking-[0.5em] rounded-2xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-              />
-            </div>
-
-            {/* Unlock Button */}
-            <button 
-              onClick={handleAdminLogin}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-slate-800 transition-all active:scale-95 shadow-xl shadow-slate-200"
-            >
-              Unlock Portal
-            </button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
+          <div className="w-full max-w-xs bg-white rounded-3xl p-8 shadow-2xl text-center">
+            <h3 className="text-xl font-black mb-6">Owner Access</h3>
+            <input type="password" value={adminPin} onChange={e => setAdminPin(e.target.value)} placeholder="PIN" className="w-full bg-slate-100 text-center py-4 rounded-xl mb-4 text-3xl font-black outline-none focus:ring-2 focus:ring-slate-900" autoFocus />
+            <button onClick={() => adminPin === 'chai123' ? (setShowAdmin(true), setShowAuthModal(false), setAdminPin("")) : toast({ title: "Incorrect PIN", variant: "destructive" })} className="w-full bg-slate-900 text-white py-4 rounded-xl font-black shadow-lg">UNLOCK</button>
+            <button onClick={() => setShowAuthModal(false)} className="py-4 text-slate-400 font-bold text-xs uppercase">Cancel</button>
           </div>
         </div>
       )}
-
     </div>
   );
 };

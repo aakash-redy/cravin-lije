@@ -1,320 +1,256 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { 
-  Trash2, CheckCircle, ChefHat, Coffee, Edit3, Save, 
-  LogOut, Search, RefreshCw, X, AlertCircle 
+  ArrowLeft, CheckCircle2, Clock, Trash2, RefreshCw, 
+  ChefHat, Coffee, DollarSign, XCircle, Search 
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "../lib/supabase";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { OrderStatus } from "@/pages/Index"; 
 
 interface AdminPortalProps {
   orders: any[];
   menuItems: any[];
-  onUpdateStatus: (id: string, status: OrderStatus) => void;
+  onUpdateStatus: (id: string, status: string) => void;
   onDelete: (id: string) => void;
-  onUpdateMenu: (updatedItems: any[]) => void;
+  onUpdateMenu: () => void;
   onBack: () => void;
-  onResetSystem: () => void; // Restored: For End of Day
+  onResetSystem: () => void;
 }
 
 const AdminPortal = ({ 
-  orders, menuItems, onUpdateStatus, onDelete, onUpdateMenu, onBack, onResetSystem 
+  orders, 
+  menuItems, 
+  onUpdateStatus, 
+  onDelete, 
+  onUpdateMenu, 
+  onBack, 
+  onResetSystem 
 }: AdminPortalProps) => {
-  
-  // --- View State ---
-  const [activeTab, setActiveTab] = useState<"orders" | "menu">("orders");
-  const [showEndDayModal, setShowEndDayModal] = useState(false);
-  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'orders' | 'menu'>('orders');
+  const [filter, setFilter] = useState<'all' | 'sent' | 'preparing' | 'ready'>('all');
 
-  // --- Menu Edit State ---
-  const [editingItem, setEditingItem] = useState<string | null>(null);
-  const [tempPrice, setTempPrice] = useState<string>("");
-  const [searchTerm, setSearchTerm] = useState("");
+  // Logic to toggle "In Stock" / "Out of Stock"
+  const toggleAvailability = async (id: string, currentStatus: boolean) => {
+    const { error } = await supabase
+      .from('menu_items')
+      .update({ available: !currentStatus })
+      .eq('id', id);
 
-  // --- Calculations ---
-  const daySummary = useMemo(() => ({
-    count: orders.length,
-    revenue: orders.reduce((sum, o) => sum + o.total, 0)
-  }), [orders]);
-
-  const filteredMenu = menuItems.filter(item => 
-    item.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // --- Handlers ---
-  const handleToggleAvailability = (id: number) => {
-    const updated = menuItems.map(item => item.id === id ? { ...item, available: !item.available } : item);
-    onUpdateMenu(updated);
-  };
-
-  const startEditing = (id: number, currentPrice: number) => {
-    setEditingItem(String(id));
-    setTempPrice(String(currentPrice));
-  };
-
-  const savePrice = (id: number) => {
-    const newPrice = parseFloat(tempPrice);
-    if (!isNaN(newPrice) && newPrice >= 0) {
-      const updated = menuItems.map(item => item.id === id ? { ...item, price: newPrice } : item);
-      onUpdateMenu(updated);
-    }
-    setEditingItem(null);
-  };
-
-  const confirmDelete = () => {
-    if (orderToDelete) {
-      onDelete(orderToDelete);
-      setOrderToDelete(null);
+    if (error) {
+      toast({ title: "Error", description: "Could not update menu", variant: "destructive" });
+    } else {
+      toast({ title: "Updated", description: "Item availability changed" });
+      onUpdateMenu(); // Refresh the main app
     }
   };
 
-  const handleEndDay = () => {
-    onResetSystem();
-    setShowEndDayModal(false);
+  // Logic to delete a menu item
+  const deleteMenuItem = async (id: string) => {
+    if (!confirm("Are you sure? This cannot be undone.")) return;
+    const { error } = await supabase.from('menu_items').delete().eq('id', id);
+    if (!error) onUpdateMenu();
   };
+
+  // Calculate Stats
+  const totalRevenue = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+  const filteredOrders = filter === 'all' ? orders : orders.filter(o => o.status === filter);
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 font-sans animate-in fade-in duration-300">
-      
-      {/* --- TOP BAR --- */}
-      <div className="sticky top-0 z-40 bg-white border-b border-slate-100 shadow-sm">
-        <div className="px-6 py-4 flex justify-between items-center">
-          
-          <button 
-            onClick={onBack}
-            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-bold text-sm bg-slate-100 px-3 py-2 rounded-lg hover:bg-slate-200"
-          >
-            <LogOut className="w-4 h-4 rotate-180" /> Back
-          </button>
-
-          <h1 className="text-xl font-black text-slate-900 flex items-center gap-2">
-            Admin Portal
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-            </span>
-          </h1>
+    <div className="min-h-screen bg-slate-50 pb-20">
+      {/* Top Bar */}
+      <div className="bg-slate-900 text-white p-6 sticky top-0 z-50 shadow-xl">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-4">
+            <button onClick={onBack} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
+              <ArrowLeft className="w-6 h-6" />
+            </button>
+            <div>
+              <h1 className="text-2xl font-black tracking-tight">Owner Portal</h1>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Cravin' Control Center</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-400 font-bold uppercase">Today's Revenue</p>
+            <p className="text-3xl font-black text-emerald-400">₹{totalRevenue}</p>
+          </div>
         </div>
 
-        {/* --- TABS --- */}
-        <div className="px-6 flex gap-4 bg-slate-50/50">
-          <button
-            onClick={() => setActiveTab("orders")}
-            className={cn(
-              "flex-1 py-3 text-sm font-bold uppercase tracking-wider border-b-4 transition-all",
-              activeTab === "orders" 
-                ? "border-slate-900 text-slate-900 bg-white shadow-sm rounded-t-lg" 
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            )}
+        {/* Tabs */}
+        <div className="flex gap-2 bg-slate-800/50 p-1 rounded-xl">
+          <button 
+            onClick={() => setActiveTab('orders')} 
+            className={cn("flex-1 py-3 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400 hover:text-white")}
           >
-            Live Orders
+            <ChefHat className="w-4 h-4" /> Live Orders ({orders.length})
           </button>
-          <button
-            onClick={() => setActiveTab("menu")}
-            className={cn(
-              "flex-1 py-3 text-sm font-bold uppercase tracking-wider border-b-4 transition-all",
-              activeTab === "menu" 
-                ? "border-emerald-500 text-emerald-700 bg-white shadow-sm rounded-t-lg" 
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            )}
+          <button 
+            onClick={() => setActiveTab('menu')} 
+            className={cn("flex-1 py-3 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400 hover:text-white")}
           >
-            Menu Manager
+            <Coffee className="w-4 h-4" /> Manage Menu
           </button>
         </div>
       </div>
 
-      <div className="container mx-auto max-w-3xl p-6">
-        
-        {/* --- TAB 1: ORDERS --- */}
-        {activeTab === "orders" && (
-          <div className="space-y-4">
-            {orders.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                <Coffee className="h-16 w-16 mb-4 opacity-10" />
-                <p className="font-medium">Kitchen is quiet.</p>
-              </div>
-            ) : (
-              orders.map((order) => (
-                <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-shadow">
-                  {/* Status Indicator Line */}
-                  <div className={cn("absolute left-0 top-0 bottom-0 w-1.5 transition-colors", 
-                    order.status === 'ready' ? "bg-emerald-500" : 
-                    order.status === 'preparing' ? "bg-amber-500" : "bg-slate-200"
-                  )} />
-
-                  <div className="flex justify-between items-start mb-4 pl-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">{order.id}</span>
-                        <span className="text-xs text-slate-400">{order.timestamp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                      </div>
-                      <h3 className="text-xl font-black text-slate-800 mt-1">{order.customerName}</h3>
-                    </div>
-                    <div className="text-right">
-                      <span className="block text-2xl font-black text-slate-900">₹{order.total}</span>
-                    </div>
-                  </div>
-
-                  {/* Order Items */}
-                  <div className="space-y-3 mb-6 pl-3 border-t border-slate-50 pt-3">
-                    {order.items.map((item: any, idx: number) => (
-                      <div key={idx} className="flex justify-between text-sm items-start">
-                        <span className="text-slate-700 font-medium flex items-center gap-2">
-                          <span className="bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded text-xs">{item.quantity}x</span> 
-                          {item.item.name}
-                        </span>
-                        {item.instructions && <span className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded max-w-[120px] truncate">{item.instructions}</span>}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* ACTION BUTTONS (Restored) */}
-                  <div className="flex gap-3 pl-3">
-                    {order.status === 'sent' && (
-                      <button onClick={() => onUpdateStatus(order.id, "preparing")} className="flex-1 bg-amber-100 text-amber-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-amber-200 transition-colors shadow-sm">
-                        <ChefHat className="w-5 h-5" /> Start Cooking
-                      </button>
-                    )}
-                    {order.status === 'preparing' && (
-                      <button onClick={() => onUpdateStatus(order.id, "ready")} className="flex-1 bg-emerald-100 text-emerald-800 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-200 transition-colors shadow-sm">
-                        <CheckCircle className="w-5 h-5" /> Mark Ready
-                      </button>
-                    )}
-                    {order.status === 'ready' && (
-                      <div className="flex-1 bg-slate-50 text-slate-400 py-3 rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-100">
-                        <CheckCircle className="w-5 h-5" /> Order Complete
-                      </div>
-                    )}
-                    
-                    <button onClick={() => setOrderToDelete(order.id)} className="p-3 bg-white border-2 border-slate-100 text-slate-400 rounded-xl hover:bg-red-50 hover:border-red-100 hover:text-red-500 transition-colors">
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* --- TAB 2: MENU MANAGER --- */}
-        {activeTab === "menu" && (
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Search menu..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
-              />
-            </div>
-
-            <div className="grid gap-3">
-              {filteredMenu.map((item) => (
-                <div key={item.id} className={cn("flex items-center justify-between p-4 rounded-xl border transition-all shadow-sm", item.available ? "bg-white border-slate-100" : "bg-slate-50 border-slate-100 opacity-60")}>
-                  <div className="flex items-center gap-4">
-                    <div className={cn("w-1.5 h-10 rounded-full", item.available ? "bg-emerald-500" : "bg-slate-300")} />
-                    <div>
-                      <h4 className="font-bold text-slate-800">{item.name}</h4>
-                      <p className="text-xs text-slate-500">{item.category}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    {/* Price Edit */}
-                    {editingItem === String(item.id) ? (
-                      <div className="flex items-center bg-slate-100 rounded-lg p-1 border border-emerald-500">
-                        <input 
-                          type="number" 
-                          value={tempPrice} 
-                          onChange={(e) => setTempPrice(e.target.value)}
-                          className="w-16 bg-transparent text-sm font-bold text-center focus:outline-none"
-                          autoFocus
-                        />
-                        <button onClick={() => savePrice(item.id)} className="p-1 text-emerald-600 bg-white rounded shadow-sm"><Save className="w-3 h-3" /></button>
-                      </div>
-                    ) : (
-                      <button onClick={() => startEditing(item.id, item.price)} className="text-sm font-bold text-slate-600 hover:text-emerald-600 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded">
-                        ₹{item.price} <Edit3 className="w-3 h-3 opacity-30" />
-                      </button>
-                    )}
-
-                    {/* Toggle Switch */}
-                    <button
-                      onClick={() => handleToggleAvailability(item.id)}
-                      className={cn(
-                        "w-10 h-6 rounded-full p-1 transition-colors duration-300 focus:outline-none",
-                        item.available ? "bg-emerald-500" : "bg-slate-300"
-                      )}
-                    >
-                      <div className={cn("w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300", item.available ? "translate-x-4" : "translate-x-0")} />
-                    </button>
-                  </div>
-                </div>
+      <div className="p-4 max-w-3xl mx-auto">
+        {activeTab === 'orders' ? (
+          <>
+            {/* Order Filters */}
+            <div className="flex gap-2 overflow-x-auto pb-4 hide-scrollbar">
+              {['all', 'sent', 'preparing', 'ready'].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f as any)}
+                  className={cn(
+                    "px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider border transition-all whitespace-nowrap",
+                    filter === f ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200"
+                  )}
+                >
+                  {f}
+                </button>
               ))}
             </div>
+
+            {/* Orders List */}
+            <div className="space-y-4">
+              {filteredOrders.length === 0 ? (
+                <div className="text-center py-20 text-slate-400">
+                  <ChefHat className="w-16 h-16 mx-auto mb-4 opacity-20" />
+                  <p className="font-bold">No active orders</p>
+                </div>
+              ) : (
+                filteredOrders.map((order) => (
+                  <motion.div 
+                    layout
+                    key={order.id} 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100"
+                  >
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-black text-slate-900">{order.customer_name}</h3>
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-md text-[10px] font-black uppercase",
+                            order.status === 'ready' ? "bg-emerald-100 text-emerald-700" :
+                            order.status === 'preparing' ? "bg-amber-100 text-amber-700" :
+                            "bg-slate-100 text-slate-600"
+                          )}>
+                            {order.status}
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-slate-400 mt-1">Order #{order.id.slice(0, 4)} • {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                      </div>
+                      <p className="text-xl font-black text-slate-900">₹{order.total_amount}</p>
+                    </div>
+
+                    {/* Order Items List */}
+                    <div className="space-y-2 mb-6 bg-slate-50 p-4 rounded-2xl">
+                      {order.order_items?.map((item: any, idx: number) => (
+                        <div key={idx} className="flex justify-between items-start text-sm">
+                          <div>
+                            <span className="font-bold text-slate-700">{item.quantity}x {item.item_name}</span>
+                            {item.instructions && (
+                              <p className="text-xs text-indigo-500 font-bold italic mt-0.5">Note: {item.instructions}</p>
+                            )}
+                            {item.is_sugar_free && (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 rounded ml-2 font-bold">SF</span>
+                            )}
+                          </div>
+                          <span className="font-medium text-slate-400">₹{item.price_at_time_of_order * item.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {order.status === 'sent' && (
+                        <button 
+                          onClick={() => onUpdateStatus(order.id, 'preparing')}
+                          className="col-span-2 bg-amber-400 hover:bg-amber-500 text-amber-950 py-3 rounded-xl font-black flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <ChefHat className="w-5 h-5" /> START COOKING
+                        </button>
+                      )}
+                      
+                      {order.status === 'preparing' && (
+                        <button 
+                          onClick={() => onUpdateStatus(order.id, 'ready')}
+                          className="col-span-2 bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <CheckCircle2 className="w-5 h-5" /> MARK READY
+                        </button>
+                      )}
+
+                      {order.status === 'ready' && (
+                        <button 
+                          onClick={() => onUpdateStatus(order.id, 'delivered')}
+                          className="col-span-2 bg-slate-900 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"
+                        >
+                          COMPLETE ORDER
+                        </button>
+                      )}
+
+                      <button 
+                        onClick={() => onDelete(order.id)}
+                        className="col-span-2 mt-2 text-xs font-bold text-red-400 hover:text-red-600 flex items-center justify-center gap-1 py-2"
+                      >
+                        <Trash2 className="w-3 h-3" /> Cancel Order
+                      </button>
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
+            
+            <div className="mt-12 pt-8 border-t border-slate-200">
+              <button 
+                onClick={onResetSystem}
+                className="w-full py-4 border-2 border-dashed border-slate-300 text-slate-400 font-bold rounded-2xl hover:border-red-200 hover:text-red-400 hover:bg-red-50 transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-5 h-5" /> ARCHIVE ALL ORDERS (END DAY)
+              </button>
+            </div>
+          </>
+        ) : (
+          /* MENU MANAGEMENT TAB */
+          <div className="space-y-4">
+             {menuItems.map((item) => (
+               <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
+                 <div className="flex items-center gap-4">
+                    <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg", item.available ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400")}>
+                      {item.name.charAt(0)}
+                    </div>
+                    <div>
+                      <h4 className={cn("font-bold text-lg", !item.available && "text-slate-400 line-through")}>{item.name}</h4>
+                      <p className="text-sm font-medium text-slate-400">₹{item.price}</p>
+                    </div>
+                 </div>
+                 
+                 <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleAvailability(item.id, item.available)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition-colors",
+                        item.available ? "bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700" : "bg-slate-100 text-slate-500 hover:bg-emerald-100 hover:text-emerald-700"
+                      )}
+                    >
+                      {item.available ? "In Stock" : "Sold Out"}
+                    </button>
+                    <button 
+                      onClick={() => deleteMenuItem(item.id)}
+                      className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                 </div>
+               </div>
+             ))}
           </div>
         )}
       </div>
-
-      {/* --- FLOATING "END DAY" BUTTON --- */}
-      <button 
-        onClick={() => setShowEndDayModal(true)} 
-        className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-slate-900 px-6 py-4 font-bold text-white shadow-xl transition-transform hover:scale-105 hover:bg-slate-800 active:scale-95"
-      >
-        <RefreshCw className="h-5 w-5" /> End Day
-      </button>
-
-      {/* --- END DAY REPORT MODAL --- */}
-      {showEndDayModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl scale-100">
-            <div className="flex justify-between items-start">
-              <div className="h-14 w-14 flex items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
-                <CheckCircle className="h-8 w-8" />
-              </div>
-              <button onClick={() => setShowEndDayModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="h-6 w-6 text-slate-400" /></button>
-            </div>
-            
-            <h2 className="mt-6 text-2xl font-black text-slate-900">End of Day Report</h2>
-            <p className="text-slate-500 mb-8">Summary of today's business.</p>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-2xl bg-slate-50 p-4 text-center border border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Orders</p>
-                <p className="mt-1 text-3xl font-black text-slate-900">{daySummary.count}</p>
-              </div>
-              <div className="rounded-2xl bg-emerald-50 p-4 text-center border border-emerald-100">
-                <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest">Revenue</p>
-                <p className="mt-1 text-3xl font-black text-emerald-700">₹{daySummary.revenue}</p>
-              </div>
-            </div>
-
-            <button onClick={handleEndDay} className="mt-8 w-full rounded-xl bg-slate-900 py-4 font-bold text-white shadow-lg active:scale-95 transition-transform">
-              Confirm & Reset System
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* --- DELETE CONFIRM MODAL --- */}
-      {orderToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
-              <AlertCircle className="h-6 w-6" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900">Delete Order?</h3>
-            <p className="text-slate-500 mt-2 text-sm">This action cannot be undone.</p>
-            
-            <div className="mt-6 flex gap-3">
-              <button onClick={() => setOrderToDelete(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold text-slate-700 hover:bg-slate-200">Cancel</button>
-              <button onClick={confirmDelete} className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white hover:bg-red-700">Yes, Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 };
