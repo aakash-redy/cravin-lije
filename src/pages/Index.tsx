@@ -6,7 +6,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
 // --- Assets ---
-import chaiLijeLogo from "@/assets/chai-lije-logo.png"; // Ensure this path is correct
+import chaiLijeLogo from "@/assets/chai-lije-logo.png"; 
 
 // --- Components ---
 import CartDrawer from "@/components/CartDrawer";
@@ -59,12 +59,11 @@ const MenuItemCard = ({ item, quantity, onAdd, onRemove, isSugarFreeMode }: {
         <div className="flex items-center gap-2 mt-3 flex-wrap">
           <span className="text-lg font-black text-slate-900">₹{item.price}</span>
           
-          {/* Smart Badge */}
           {item.is_sugar_free_available && (
             <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold flex items-center gap-1 transition-colors ${
               isSugarFreeMode ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"
             }`}>
-              <Leaf className="w-3 h-3" /> {isSugarFreeMode ? "Sugar Free" : "Option"}
+              <Leaf className="w-3 h-3" /> {isSugarFreeMode ? "Sugar Free Applied" : "Sugar Free Option"}
             </span>
           )}
         </div>
@@ -100,7 +99,6 @@ const MenuItemCard = ({ item, quantity, onAdd, onRemove, isSugarFreeMode }: {
   );
 };
 
-// --- LOADING SKELETON ---
 const MenuSkeleton = () => (
   <div className="space-y-4 p-4">
     {[1, 2, 3, 4].map(i => (
@@ -109,13 +107,11 @@ const MenuSkeleton = () => (
   </div>
 );
 
-// --- MAIN COMPONENT ---
 const Index = () => {
   const { shopId } = useParams(); 
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // --- State ---
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -123,41 +119,26 @@ const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSugarFreeMode, setIsSugarFreeMode] = useState(false);
   const [activeCategory, setActiveCategory] = useState("All");
-
-  // --- SECRET ADMIN DOOR LOGIC ---
   const [tapCount, setTapCount] = useState(0);
 
   const handleLogoClick = () => {
-    // Haptic feedback for secret door
     if (navigator.vibrate) navigator.vibrate(50);
-    
     setTapCount(prev => prev + 1);
     setTimeout(() => setTapCount(0), 1000);
-
     if (tapCount + 1 === 2) { 
       toast({ title: "Secret Access", description: "Entering Owner Portal..." });
       navigate('/admin');
     }
   };
 
-  // --- Fetch Data ---
   useEffect(() => {
     fetchMenu();
-
     const channel = supabase
       .channel('menu-updates')
-      .on(
-        'postgres_changes', 
-        { event: 'UPDATE', schema: 'public', table: 'menu_items' }, 
-        (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'menu_items' }, (payload) => {
           const updatedItem = payload.new as MenuItem;
-          setMenuItems((prev) => 
-            prev.map(item => item.id === updatedItem.id ? updatedItem : item)
-          );
-        }
-      )
-      .subscribe();
-
+          setMenuItems((prev) => prev.map(item => item.id === updatedItem.id ? updatedItem : item));
+      }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [shopId]);
 
@@ -169,10 +150,8 @@ const Index = () => {
     setLoading(false);
   };
 
-  // --- Categories & Search ---
   const categories = useMemo(() => {
     if (menuItems.length === 0) return ["All"];
-    // Search by name OR description
     const filtered = menuItems.filter(i => 
       i.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       i.description?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -181,7 +160,6 @@ const Index = () => {
     return ["All", ...cats.sort()];
   }, [menuItems, searchQuery]);
 
-  // --- Scroll Logic ---
   const handleCategoryClick = (category: string) => {
     setActiveCategory(category);
     if (category === "All") window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -196,30 +174,22 @@ const Index = () => {
     }
   };
 
-  // --- Cart Logic ---
-  
-  // 1. Add Item (Vibrates phone)
   const addToCart = (item: MenuItem, isSugarFree = false) => {
-    if (navigator.vibrate) navigator.vibrate(20); // Tactile response
-    
+    if (navigator.vibrate) navigator.vibrate(20);
     const uniqueKey = `${item.id}-${isSugarFree ? 'sf' : 'reg'}`;
     setCartItems(prev => {
       const existing = prev.find(i => i.uniqueKey === uniqueKey);
-      if (existing) {
-        return prev.map(i => i.uniqueKey === uniqueKey ? { ...i, quantity: i.quantity + 1 } : i);
-      }
+      if (existing) return prev.map(i => i.uniqueKey === uniqueKey ? { ...i, quantity: i.quantity + 1 } : i);
       return [...prev, { uniqueKey, item, quantity: 1, isSugarFree }];
     });
   };
 
-  // 2. Remove Item
   const removeFromCart = (itemId: string, isSugarFree = false) => {
     if (navigator.vibrate) navigator.vibrate(20);
     const uniqueKey = `${itemId}-${isSugarFree ? 'sf' : 'reg'}`;
     setCartItems(prev => prev.map(i => i.uniqueKey === uniqueKey ? { ...i, quantity: i.quantity - 1 } : i).filter(i => i.quantity > 0));
   };
 
-  // 3. Toggle Sugar INSIDE Cart
   const handleToggleSugarInCart = (uniqueKey: string) => {
     setCartItems(prev => prev.map(item => 
       item.uniqueKey === uniqueKey 
@@ -228,26 +198,18 @@ const Index = () => {
     ));
   };
 
-  // 4. Update Instructions (New Hybrid Logic)
   const handleUpdateInstructions = (uniqueKey: string, note: string) => {
-    setCartItems(prev => prev.map(item => 
-      item.uniqueKey === uniqueKey ? { ...item, instructions: note } : item
-    ));
+    setCartItems(prev => prev.map(item => item.uniqueKey === uniqueKey ? { ...item, instructions: note } : item));
   };
 
-  // 5. Checkout
   const handlePlaceOrder = async (customerName: string) => {
     if (cartItems.length === 0) return;
     const totalAmount = cartItems.reduce((sum, i) => sum + (i.item.price * i.quantity), 0);
     
-    // Construct Order Payload
-    const { data, error } = await supabase
-      .from('orders')
-      .insert([{
+    const { data, error } = await supabase.from('orders').insert([{
         customer_name: customerName,
         total_amount: totalAmount,
         status: 'sent',
-        // Stores item-specific instructions
         order_items: cartItems.map(i => ({
           item_id: i.item.id,
           item_name: i.item.name,
@@ -256,9 +218,7 @@ const Index = () => {
           is_sugar_free: i.isSugarFree,
           instructions: i.instructions
         }))
-      }])
-      .select()
-      .single();
+      }]).select().single();
 
     if (!error) {
       setCartItems([]);
@@ -273,35 +233,21 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 font-sans selection:bg-emerald-500/30">
-      
-      {/* --- HEADER --- */}
       <div className="bg-slate-900 text-white p-6 pb-8 rounded-b-[2.5rem] shadow-2xl shadow-slate-900/20 relative z-10">
         <div className="flex justify-between items-center mb-6">
-          
-          {/* LOGO & DEVELOPER INFO */}
           <div onClick={handleLogoClick} className="cursor-pointer active:scale-95 transition-transform select-none flex items-center gap-3">
-             <img 
-               src={chaiLijeLogo} 
-               alt="Chai Lije" 
-               className="h-14 w-auto object-contain bg-white rounded-xl p-1 shadow-lg" 
-             />
+             <img src={chaiLijeLogo} alt="Chai Lije" className="h-14 w-auto object-contain bg-white rounded-xl p-1 shadow-lg" />
              <div className="flex flex-col">
                <span className="text-xl font-black leading-none tracking-tight">Cravin</span>
-               
                <div className="flex flex-col mt-1.5">
                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Created by Aakash</span>
-                 <a 
-                   href="tel:+919640235706" 
-                   onClick={(e) => e.stopPropagation()} 
-                   className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 hover:text-white transition-colors mt-0.5"
-                 >
+                 <a href="tel:+919640235706" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 hover:text-white transition-colors mt-0.5">
                    <Phone className="w-2.5 h-2.5" /> Contact Dev
                  </a>
                </div>
              </div>
           </div>
 
-          {/* GLOBAL SUGAR TOGGLE */}
           <button 
             onClick={() => {
               if (navigator.vibrate) navigator.vibrate(20);
@@ -318,27 +264,18 @@ const Index = () => {
           </button>
         </div>
 
-        {/* SEARCH BAR */}
         <div className="relative mt-2">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-          <input 
-            type="text" 
-            placeholder="Search chai, snacks..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-800/80 backdrop-blur-md border border-slate-700/50 rounded-2xl py-4 pl-12 pr-4 text-white placeholder:text-slate-500 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-inner"
-          />
+          <input type="text" placeholder="Search chai, snacks..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-800/80 backdrop-blur-md border border-slate-700/50 rounded-2xl py-4 pl-12 pr-4 text-white placeholder:text-slate-500 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-inner" />
         </div>
       </div>
 
-      {/* --- STICKY NAV --- */}
       <div className="sticky top-0 z-40 -mt-6 pt-6 pointer-events-none"> 
         <div className="pointer-events-auto">
           <CategoryNav categories={categories} activeCategory={activeCategory} onSelect={handleCategoryClick} />
         </div>
       </div>
 
-      {/* --- MENU GRID --- */}
       <div className="p-4 space-y-8 mt-2 min-h-[50vh]">
         {loading ? <MenuSkeleton /> : (
           <>
@@ -350,10 +287,17 @@ const Index = () => {
             )}
 
             {categories.filter(c => c !== "All").map((cat) => {
-              const categoryItems = menuItems.filter(item => 
-                item.category === cat && 
-                (item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.description?.toLowerCase().includes(searchQuery.toLowerCase()))
-              );
+              // --- THE FILTER LOGIC FIX ---
+              const categoryItems = menuItems.filter(item => {
+                const matchesCategory = item.category === cat;
+                const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                     item.description?.toLowerCase().includes(searchQuery.toLowerCase());
+                
+                // If Sugar Free mode is ON, we only show items where is_sugar_free_available is TRUE
+                const matchesSugarFilter = isSugarFreeMode ? item.is_sugar_free_available : true;
+
+                return matchesCategory && matchesSearch && matchesSugarFilter;
+              });
               
               if (categoryItems.length === 0) return null;
 
@@ -382,7 +326,6 @@ const Index = () => {
         )}
       </div>
 
-      {/* --- CART DRAWER --- */}
       <CartDrawer 
         open={isCartOpen} 
         onClose={() => setIsCartOpen(false)}
@@ -390,23 +333,14 @@ const Index = () => {
         onAdd={(id, sf) => { const item = menuItems.find(i => i.id === id); if (item) addToCart(item, sf); }}
         onRemove={removeFromCart}
         onToggleSugar={handleToggleSugarInCart} 
-        onUpdateItemInstructions={handleUpdateInstructions} // <--- Connected!
+        onUpdateItemInstructions={handleUpdateInstructions}
         onPlaceOrder={handlePlaceOrder}
       />
       
-      {/* --- FLOATING CART BUTTON --- */}
       <AnimatePresence>
         {!isCartOpen && cartItems.length > 0 && (
-          <motion.div 
-            initial={{ y: 100, opacity: 0 }} 
-            animate={{ y: 0, opacity: 1 }} 
-            exit={{ y: 100, opacity: 0 }} 
-            className="fixed bottom-6 left-4 right-4 z-30"
-          >
-            <button 
-              onClick={() => setIsCartOpen(true)} 
-              className="w-full bg-slate-900 text-white p-4 rounded-[1.5rem] shadow-2xl flex items-center justify-between border-t border-slate-800 active:scale-95 transition-transform"
-            >
+          <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} className="fixed bottom-6 left-4 right-4 z-30">
+            <button onClick={() => setIsCartOpen(true)} className="w-full bg-slate-900 text-white p-4 rounded-[1.5rem] shadow-2xl flex items-center justify-between border-t border-slate-800 active:scale-95 transition-transform">
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <span className="bg-emerald-500 text-white w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg shadow-lg border-2 border-slate-900">

@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion"; 
 import { supabase } from "@/lib/supabase";
-import { Lock, Loader2, Phone, ShieldCheck, LogOut, ArrowLeft, AlertCircle } from "lucide-react";
+import { Lock, Loader2, Phone, LogOut, ArrowLeft, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useNavigate } from "react-router-dom"; // Import for the back button
+import { useNavigate } from "react-router-dom";
 import AdminPortal from "@/components/AdminPortal";
 
-// Get PIN from environment variables (Safety Check)
+// Get PIN from environment variables (No hardcoded fallback for security)
 const ADMIN_PIN = import.meta.env.VITE_ADMIN_PIN;
 
 const AdminLogin = () => {
-  const navigate = useNavigate(); // Hook for navigation
+  const navigate = useNavigate();
   const { toast } = useToast();
   
   // Auth State
@@ -25,18 +25,19 @@ const AdminLogin = () => {
 
   // --- 1. FETCH DATA ---
   const fetchData = async () => {
-    if (!isAuthenticated) return; // Don't fetch if locked
+    // Only fetch if the user is authorized to see the data
+    if (!isAuthenticated) return; 
     
     setLoading(true);
     
-    // Fetch Active Orders
+    // Fetch Active Orders (Not Archived)
     const { data: ordersData } = await supabase
       .from('orders')
       .select('*')
       .neq('status', 'archived') 
       .order('created_at', { ascending: false });
 
-    // Fetch Menu
+    // Fetch Full Menu
     const { data: menuData } = await supabase
       .from('menu_items')
       .select('*')
@@ -52,39 +53,46 @@ const AdminLogin = () => {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
+    if (navigator.vibrate) navigator.vibrate(50);
 
+    // Block access if ENV is missing
     if (!ADMIN_PIN) {
-      toast({ title: "System Error", description: "Admin PIN not configured in .env file", variant: "destructive" });
+      toast({ 
+        title: "System Configuration Error", 
+        description: "Admin PIN missing in environment variables.", 
+        variant: "destructive" 
+      });
       return;
     }
 
     if (password === ADMIN_PIN) { 
       setIsAuthenticated(true);
       setError(false);
-      toast({ title: "Access Granted", description: "Welcome back, Boss." });
+      toast({ title: "Welcome back, Boss.", description: "Chai Lije Dashboard unlocked." });
     } else {
       setError(true);
-      setPassword(""); // Clear input on fail
+      setPassword(""); // Clear input
       toast({ title: "Access Denied", variant: "destructive" });
     }
   };
 
-  // --- 3. LIVE ORDER MANAGEMENT ---
+  // --- 3. DATA MANAGEMENT FUNCTIONS ---
+
   const handleUpdateStatus = async (id: string, status: string) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o)); // Optimistic
+    // Optimistic UI Update (Immediate visual change)
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
     await supabase.from('orders').update({ status }).eq('id', id);
   };
 
   const handleDeleteOrder = async (id: string) => {
-    if(!confirm("Cancel this order?")) return;
+    // This function maps to 'onDelete' in your AdminPortal
     setOrders(prev => prev.filter(o => o.id !== id));
     await supabase.from('orders').delete().eq('id', id);
+    toast({ title: "Order Removed" });
   };
 
-  // --- 4. END DAY LOGIC ---
   const handleEndDay = async () => {
-    const confirm = window.confirm("Archive all orders and reset the live dashboard?");
+    const confirm = window.confirm("End the day? All active orders will be archived.");
     if (!confirm) return;
 
     setLoading(true);
@@ -94,24 +102,25 @@ const AdminLogin = () => {
       .neq('status', 'archived'); 
 
     if (error) {
-      toast({ title: "Reset Failed", description: "Check database permissions.", variant: "destructive" });
+      toast({ title: "Reset Failed", description: "Check database rules.", variant: "destructive" });
     } else {
-      toast({ title: "Success", description: "System Reset Complete." });
+      toast({ title: "Dashboard Reset", description: "All orders archived successfully." });
       await fetchData(); 
     }
     setLoading(false);
   };
 
-  // --- 5. REAL-TIME SUBSCRIPTION ---
+  // --- 4. REAL-TIME SUBSCRIPTION ---
   useEffect(() => {
     if (!isAuthenticated) return;
     
     fetchData(); // Initial load
 
-    const channel = supabase
-      .channel('admin-dashboard')
+    // Listen for Order changes or Menu changes to keep Admin in sync
+    const channel = supabase.channel('admin-dashboard-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, fetchData)
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -122,88 +131,85 @@ const AdminLogin = () => {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-6 relative overflow-hidden">
         
-        {/* Background Effects */}
-        <div className="absolute top-[-10%] right-[-10%] w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-[-10%] left-[-10%] w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+        {/* Decorative Blobs */}
+        <div className="absolute top-[-10%] right-[-10%] w-80 h-80 bg-emerald-500/10 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] left-[-10%] w-80 h-80 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none" />
 
         <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }} 
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 w-full max-w-sm p-8 rounded-[2.5rem] shadow-2xl relative z-10"
+          initial={{ opacity: 0, y: 20 }} 
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-slate-900/40 backdrop-blur-2xl border border-slate-800 w-full max-w-sm p-8 rounded-[3rem] shadow-2xl relative z-10"
         >
           <div className="flex justify-center mb-8">
-            <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center shadow-inner ring-4 ring-slate-900">
+            <div className="w-20 h-20 bg-slate-800 rounded-3xl flex items-center justify-center shadow-inner ring-1 ring-slate-700">
               <Lock className="w-8 h-8 text-emerald-500" />
             </div>
           </div>
 
-          <h1 className="text-2xl font-black text-white text-center mb-2">Restricted Access</h1>
-          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest text-center mb-8">Owner Authorization Required</p>
+          <h1 className="text-2xl font-black text-white text-center mb-1 tracking-tight">Owner Access</h1>
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] text-center mb-10">Chai Lije Dashboard</p>
           
           <form onSubmit={handleLogin} className="space-y-6">
             <div className="relative">
-              <input
+              <motion.input
+                animate={error ? { x: [-10, 10, -10, 10, 0] } : {}}
                 type="password"
                 inputMode="numeric"
                 value={password}
                 onChange={(e) => { setError(false); setPassword(e.target.value); }}
-                placeholder="• • • •"
-                className={`w-full text-center text-3xl font-black tracking-[0.5em] p-4 bg-slate-950 rounded-2xl border-2 ${error ? 'border-red-500 text-red-500' : 'border-slate-800 focus:border-emerald-500 text-white'} transition-all outline-none placeholder:text-slate-700 placeholder:tracking-normal`}
+                placeholder="PIN REQUIRED"
+                className={`w-full text-center text-2xl font-black tracking-[0.5em] p-5 bg-slate-950/50 rounded-2xl border-2 ${error ? 'border-red-500 text-red-500' : 'border-slate-800 focus:border-emerald-500 text-white'} transition-all outline-none placeholder:text-slate-800 placeholder:tracking-widest placeholder:text-xs`}
                 autoFocus
               />
               {error && (
                 <motion.div 
-                  initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
-                  className="absolute -bottom-6 left-0 right-0 text-center flex items-center justify-center gap-1 text-red-400 text-xs font-bold"
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  className="absolute -bottom-6 left-0 right-0 text-center flex items-center justify-center gap-1 text-red-500 text-[10px] font-black uppercase tracking-widest"
                 >
-                  <AlertCircle className="w-3 h-3" /> Incorrect PIN
+                  <AlertCircle className="w-3 h-3" /> Access Denied
                 </motion.div>
               )}
             </div>
 
-            <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-4 rounded-2xl shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all mt-4">
-              UNLOCK DASHBOARD
+            <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-5 rounded-2xl shadow-xl shadow-emerald-500/10 active:scale-95 transition-all mt-4">
+              UNLOCK SYSTEM
             </button>
           </form>
 
-          {/* PANIC BUTTON (GO BACK) */}
-          <div className="mt-8 pt-6 border-t border-slate-800">
+          {/* BACK BUTTON */}
+          <div className="mt-8 pt-6 border-t border-slate-800/50">
             <button 
               onClick={() => navigate('/')}
-              className="w-full flex items-center justify-center gap-2 text-slate-500 font-bold text-sm hover:text-white transition-colors py-2 active:scale-95"
+              className="w-full flex items-center justify-center gap-2 text-slate-500 font-bold text-xs hover:text-white transition-colors py-2"
             >
-              <ArrowLeft className="w-4 h-4" /> Go back to Menu
+              <ArrowLeft className="w-4 h-4" /> Exit to Customer View
             </button>
-          </div>
-
-          {/* Credits */}
-          <div className="mt-4 text-center">
-             <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-               System by Aakash
-             </p>
           </div>
         </motion.div>
       </div>
     );
   }
 
-  // --- RENDER: LOADING ---
+  // --- RENDER: LOADING STATE ---
   if (loading && orders.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="w-10 h-10 animate-spin text-slate-900" />
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-10 h-10 animate-spin text-slate-900" />
+          <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Loading Live Data...</p>
+        </div>
       </div>
     );
   }
 
-  // --- RENDER: DASHBOARD ---
+  // --- RENDER: FULL DASHBOARD ---
   return (
     <AdminPortal 
       orders={orders}
       menuItems={menuItems}
       onUpdateStatus={handleUpdateStatus}
-      onDelete={handleDeleteOrder}
-      onUpdateMenu={fetchData} // Pass the fetch function so Portal can trigger refreshes
+      onDelete={handleDeleteOrder} // Passed to solve the confirmCancel error
+      onUpdateMenu={fetchData} 
       onBack={() => setIsAuthenticated(false)}
       onResetSystem={handleEndDay} 
     />
