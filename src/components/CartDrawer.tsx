@@ -9,7 +9,7 @@ interface CartItem {
   item: any; 
   quantity: number;
   isSugarFree: boolean;
-  instructions?: string; // We store instructions on the item itself
+  instructions?: string; 
 }
 
 interface CartDrawerProps {
@@ -19,16 +19,13 @@ interface CartDrawerProps {
   onAdd: (id: any, isSugarFree: boolean) => void;
   onRemove: (id: any, isSugarFree: boolean) => void;
   onToggleSugar?: (uniqueKey: string) => void;
-  
-  // New Prop to update specific item instructions
   onUpdateItemInstructions: (uniqueKey: string, instructions: string) => void; 
-  
   onPlaceOrder: (name: string) => void; 
 }
 
 const QUICK_TAGS = ["Less Sugar", "Strong", "No Milk", "Extra Hot", "Spicy"];
 
-// --- Helper Input Component (Prevents Focus Loss) ---
+// --- Helper Input Component (Isolated for Performance) ---
 const InstructionInput = ({ 
   value, 
   onChange, 
@@ -45,11 +42,10 @@ const InstructionInput = ({
         onChange={(e) => onChange(e.target.value)}
         placeholder={isBigMode ? "e.g. Less ice, extra spicy, make it hot..." : "Note for chef..."}
         className={cn(
-          "w-full resize-none rounded-2xl bg-slate-50 p-3 font-bold text-slate-900 placeholder:text-slate-300 outline-none border-2 border-transparent focus:border-slate-900 transition-all",
+          "w-full resize-none rounded-2xl bg-slate-50 p-3 font-bold text-slate-900 placeholder:text-slate-300 outline-none border-2 border-transparent focus:border-emerald-500/20 transition-all",
           isBigMode ? "h-32 text-lg shadow-inner" : "h-20 text-xs"
         )}
       />
-      {/* Quick Tags (Only show for big mode to save space in multi-item view) */}
       {isBigMode && (
         <div className="flex flex-wrap gap-2">
           {QUICK_TAGS.map((tag) => (
@@ -79,13 +75,11 @@ const CartDrawer = ({
   onPlaceOrder
 }: CartDrawerProps) => {
   const [customerName, setCustomerName] = useState("");
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(null); // Tracks which note is open in multi-mode
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
 
-  // Logic to determine layout mode
   const isSingleItem = cartItems.length === 1;
   const total = cartItems.reduce((s, ci) => s + (ci.item.price * ci.quantity), 0);
 
-  // Reset state when drawer opens/closes
   useEffect(() => {
     if (!open) setCustomerName("");
   }, [open]);
@@ -100,14 +94,12 @@ const CartDrawer = ({
     <AnimatePresence>
       {open && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm"
             onClick={onClose}
           />
 
-          {/* Drawer Panel */}
           <motion.div
             initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
@@ -131,7 +123,7 @@ const CartDrawer = ({
             </div>
 
             {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-6 pb-40">
+            <div className="flex-1 overflow-y-auto p-6 pb-60">
               {cartItems.length === 0 ? (
                 <div className="h-[50vh] flex flex-col items-center justify-center text-center opacity-50">
                   <ShoppingBag className="w-16 h-16 text-slate-300 mb-4" />
@@ -142,7 +134,6 @@ const CartDrawer = ({
                   {cartItems.map((ci) => (
                     <div key={ci.uniqueKey} className={cn("group relative bg-white rounded-2xl", !isSingleItem && "pb-4 border-b border-dashed border-slate-100")}>
                       
-                      {/* 1. Item Row */}
                       <div className="flex items-start justify-between">
                         <div className="flex-1 pr-4">
                           <h3 className="font-black text-slate-900 text-lg leading-tight">{ci.item.name}</h3>
@@ -164,7 +155,6 @@ const CartDrawer = ({
                             </label>
                           </div>
 
-                          {/* MULTI ITEM: "Add Note" Button */}
                           {!isSingleItem && (
                             <button 
                               onClick={() => setActiveNoteId(activeNoteId === ci.uniqueKey ? null : ci.uniqueKey)}
@@ -179,7 +169,6 @@ const CartDrawer = ({
                           )}
                         </div>
 
-                        {/* Quantity Controls */}
                         <div className="flex flex-col items-center gap-1 bg-white p-1 rounded-2xl shadow-sm border border-slate-100">
                           <button onClick={() => onAdd(ci.item.id, ci.isSugarFree)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-900 text-white active:scale-90 transition-all"><Plus className="h-4 w-4" /></button>
                           <span className="h-6 flex items-center justify-center font-black text-sm">{ci.quantity}</span>
@@ -189,9 +178,7 @@ const CartDrawer = ({
                         </div>
                       </div>
 
-                      {/* 2. INSTRUCTION AREAS */}
-                      
-                      {/* SINGLE ITEM: Huge Box (Always Visible) */}
+                      {/* INSTRUCTIONS AREA */}
                       {isSingleItem && (
                         <div className="mt-4">
                           <div className="flex items-center gap-2 mb-2">
@@ -206,7 +193,6 @@ const CartDrawer = ({
                         </div>
                       )}
 
-                      {/* MULTI ITEM: Small Box (Toggled) */}
                       <AnimatePresence>
                         {!isSingleItem && activeNoteId === ci.uniqueKey && (
                           <motion.div
@@ -248,12 +234,16 @@ const CartDrawer = ({
                     <button
                       onClick={handleSubmit}
                       disabled={!customerName.trim()}
-                      className="w-full relative overflow-hidden rounded-2xl bg-slate-900 py-4 text-lg font-black text-white shadow-lg shadow-slate-900/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 disabled:shadow-none"
+                      className="w-full relative overflow-hidden rounded-2xl bg-emerald-500 py-5 text-xl font-black text-white shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-600 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 disabled:shadow-none"
                     >
-                      <span className="flex items-center justify-center gap-2">
-                        PAY ₹{total} <Check className="h-6 w-6" />
+                      <span className="flex items-center justify-center gap-3">
+                        PLACE ORDER <Check className="h-6 w-6" />
                       </span>
                     </button>
+                    
+                    <p className="text-[10px] text-center text-slate-400 font-bold uppercase tracking-widest mt-3">
+                      Pay at the counter after ordering
+                    </p>
                   </div>
                 </div>
               </div>
