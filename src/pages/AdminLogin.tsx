@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion"; 
 import { supabase } from "@/lib/supabase";
-import { Lock, Loader2 } from "lucide-react";
+import { Lock, Loader2, Phone, ShieldCheck, LogOut } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import AdminPortal from "@/components/AdminPortal"; // Ensure you saved the previous code here!
+import AdminPortal from "@/components/AdminPortal";
 
 const AdminLogin = () => {
   const { toast } = useToast();
@@ -14,19 +15,19 @@ const AdminLogin = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
 
-  // --- FETCH DATA (Only runs if authenticated) ---
+  // --- 1. FETCH DATA (Excludes Archived Orders) ---
   const fetchData = async () => {
     setLoading(true);
     
-    // 1. Get Orders
-    const { data: ordersData } = await supabase
+    // Fetch only active orders to keep the dashboard clean
+    const { data: ordersData, error: orderErr } = await supabase
       .from('orders')
-     // ✅ NEW (Fast JSON Way)
       .select('*')
+      .neq('status', 'archived') 
       .order('created_at', { ascending: false });
 
-    // 2. Get Menu
-    const { data: menuData } = await supabase
+    // Fetch all menu items for inventory management
+    const { data: menuData, error: menuErr } = await supabase
       .from('menu_items')
       .select('*')
       .order('category', { ascending: true });
@@ -34,27 +35,30 @@ const AdminLogin = () => {
     if (ordersData) setOrders(ordersData);
     if (menuData) setMenuItems(menuData);
     
+    if (orderErr || menuErr) {
+      console.error("Fetch Error:", orderErr || menuErr);
+    }
+    
     setLoading(false);
   };
 
-  // --- HANDLERS ---
+  // --- 2. AUTHENTICATION HANDLER ---
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simple PIN protection for now (Change "admin123" to whatever you want)
-    if (password === "admin123") {
+    // Your Secure PIN
+    if (password === "admin123") { 
       setIsAuthenticated(true);
       fetchData();
-      toast({ title: "Welcome back!", description: "Access granted to Owner Portal." });
+      toast({ title: "Access Granted", description: "Welcome back, Aakash." });
     } else {
-      toast({ title: "Access Denied", description: "Wrong password.", variant: "destructive" });
+      toast({ title: "Error", description: "Invalid PIN.", variant: "destructive" });
     }
   };
 
+  // --- 3. LIVE ORDER MANAGEMENT ---
   const handleUpdateStatus = async (id: string, status: string) => {
-    // Optimistic Update (Update UI instantly)
+    // Optimistic UI Update
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-    
-    // Update DB
     await supabase.from('orders').update({ status }).eq('id', id);
   };
 
@@ -63,32 +67,60 @@ const AdminLogin = () => {
     await supabase.from('orders').delete().eq('id', id);
   };
 
-  // --- SUBSCRIBE TO LIVE UPDATES ---
+  // --- 4. THE "END DAY" ARCHIVING LOGIC ---
+  const handleEndDay = async () => {
+  const confirm = window.confirm("Archive all orders and reset the live dashboard?");
+  if (!confirm) return;
+
+  setLoading(true);
+  
+  // We use .update() to change all non-archived orders to 'archived'
+  const { error } = await supabase
+    .from('orders')
+    .update({ status: 'archived' })
+    .neq('status', 'archived'); 
+
+  if (error) {
+    console.error("Supabase Error:", error);
+    toast({ 
+      title: "Reset Failed", 
+      description: "Run the SQL command to allow 'archived' status.", 
+      variant: "destructive" 
+    });
+  } else {
+    toast({ title: "Success", description: "Dashboard reset!" });
+    await fetchData(); 
+  }
+  setLoading(false);
+};
+  // --- 5. REAL-TIME SUBSCRIPTION ---
   useEffect(() => {
     if (!isAuthenticated) return;
-
     const channel = supabase
-      .channel('admin-dashboard')
+      .channel('admin-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        fetchData(); // Refetch if new order comes in
+        fetchData();
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [isAuthenticated]);
 
   // --- RENDER ---
   
-  // 1. LOGIN SCREEN
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
-        <div className="bg-white w-full max-w-sm p-8 rounded-[2rem] shadow-2xl">
-          <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Lock className="w-8 h-8 text-slate-900" />
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-6">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }} 
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white w-full max-w-sm p-8 rounded-[2.5rem] shadow-2xl relative"
+        >
+          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-xl">
+            <Lock className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-black text-center text-slate-900 mb-2">Owner Login</h1>
-          <p className="text-center text-slate-400 text-sm mb-8">Enter your PIN to manage Cravin.</p>
+
+          <h1 className="text-2xl font-black text-slate-900 mb-1">Owner Portal</h1>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">System Security</p>
           
           <form onSubmit={handleLogin} className="space-y-4">
             <input
@@ -96,31 +128,41 @@ const AdminLogin = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter PIN"
-              className="w-full text-center text-2xl font-black tracking-widest p-4 bg-slate-50 rounded-xl border-2 border-slate-100 focus:border-slate-900 focus:outline-none transition-colors"
+              className="w-full text-center text-3xl font-black tracking-[0.5em] p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 focus:border-slate-900 transition-all outline-none"
               autoFocus
             />
-            <button 
-              type="submit"
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:scale-[1.02] active:scale-95 transition-transform"
-            >
-              UNLOCK PORTAL
+            <button className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+              UNLOCK DASHBOARD
             </button>
           </form>
-        </div>
+
+          {/* Developer Credentials Section */}
+          <div className="mt-10 pt-6 border-t border-slate-100 flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-slate-300 uppercase">Lead Developer</span>
+              <span className="text-sm font-bold text-slate-900">Aakash</span>
+            </div>
+            <a 
+              href="tel:+910000000000" 
+              className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:text-emerald-500 transition-colors"
+            >
+              <Phone className="w-5 h-5" />
+            </a>
+          </div>
+        </motion.div>
       </div>
     );
   }
 
-  // 2. LOADING SCREEN
+  // Show Loading Spinner during refresh
   if (loading && orders.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="w-10 h-10 animate-spin text-slate-400" />
+        <Loader2 className="w-10 h-10 animate-spin text-slate-900" />
       </div>
     );
   }
 
-  // 3. ACTUAL DASHBOARD (Reusing the enhanced component)
   return (
     <AdminPortal 
       orders={orders}
@@ -129,10 +171,7 @@ const AdminLogin = () => {
       onDelete={handleDeleteOrder}
       onUpdateMenu={fetchData}
       onBack={() => setIsAuthenticated(false)}
-      onResetSystem={() => {
-        // Logic to archive orders could go here
-        alert("System Reset Feature Coming Soon!");
-      }}
+      onResetSystem={handleEndDay} 
     />
   );
 };

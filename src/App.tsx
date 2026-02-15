@@ -2,66 +2,88 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { useEffect } from "react";
+import { AnimatePresence } from "framer-motion";
 
-// --- Pages ---
+// --- PAGES ---
 import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
-// You will need to create these empty placeholders if they don't exist yet, 
-// or point them to Index for now.
-import AdminLogin from "./pages/AdminLogin"; 
-import OrderSuccess from "./pages/OrderSuccess"; 
+import AdminLogin from "./pages/AdminLogin";
+import OrderSuccess from "./pages/OrderSuccess";
+import Feedback from "./pages/Feedback"; // Ensure you created this file!
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 5, // Keep menu data fresh for 5 minutes
-      refetchOnWindowFocus: false, // Don't reload just because they swapped tabs
-    },
-  },
-});
+const queryClient = new QueryClient();
 
-const App = () => {
-  // Optional: Set the mobile browser theme color to match Cravin brand
+// --- SCROLL TO TOP COMPONENT ---
+// This ensures that when you change pages, the view resets to the top
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
   useEffect(() => {
-    const metaThemeColor = document.querySelector("meta[name=theme-color]");
-    if (metaThemeColor) {
-      metaThemeColor.setAttribute("content", "#0f172a"); // Slate-900 (Your Brand Color)
-    }
-  }, []);
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  return null;
+};
 
+// --- MAIN APP COMPONENT ---
+const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        {/* Toast Notifications */}
-        <Toaster />
-        <Sonner position="top-center" richColors closeButton />
         
+        {/* GLOBAL NOTIFICATIONS */}
+        <Toaster />
+        <Sonner />
+
         <BrowserRouter>
-          <Routes>
-            {/* 1. Main Customer Landing (Default Shop) */}
-            <Route path="/" element={<Index />} />
-
-            {/* 2. Multi-Tenant Dynamic Shop Route 
-                Example: cravin.in/jntu-canteen 
-                (Index page will read the ID from URL) 
-            */}
-            <Route path="/shop/:shopId" element={<Index />} />
-
-            {/* 3. Secure Admin Portal */}
-            <Route path="/admin" element={<AdminLogin />} />
-
-            {/* 4. Post-Checkout Experience */}
-            <Route path="/order-success" element={<OrderSuccess />} />
-
-            {/* 5. Catch-All for 404s */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <ScrollToTop />
+          
+          {/* ANIMATED ROUTES WRAPPER */}
+          <AnimatedRoutes />
+          
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
   );
 };
+
+// --- SEPARATE COMPONENT FOR ANIMATIONS ---
+// We need this separation so 'useLocation' works correctly
+const AnimatedRoutes = () => {
+  const location = useLocation();
+
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        
+        {/* 1. MAIN MENU (Home) */}
+        <Route path="/" element={<Index />} />
+        
+        {/* 2. OWNER PORTAL (Secret Double-Tap Access) */}
+        <Route path="/admin" element={<AdminLogin />} />
+        
+        {/* 3. ORDER SUCCESS (Receipt Screen) */}
+        <Route path="/order-success" element={<OrderSuccess />} />
+        
+        {/* 4. CUSTOMER FEEDBACK */}
+        <Route path="/feedback" element={<Feedback />} />
+
+        {/* 5. CATCH-ALL (404 Page) */}
+        <Route path="*" element={<NotFound />} />
+        
+      </Routes>
+    </AnimatePresence>
+  );
+};
+
+// --- SIMPLE 404 PAGE ---
+const NotFound = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-50 text-center p-4">
+    <div>
+      <h1 className="text-4xl font-black text-slate-900 mb-2">404</h1>
+      <p className="text-slate-500 font-bold mb-4">Oops! This page doesn't exist.</p>
+      <a href="/" className="text-emerald-600 font-black underline">Go back to Menu</a>
+    </div>
+  </div>
+);
 
 export default App;
