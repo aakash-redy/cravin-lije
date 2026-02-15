@@ -139,21 +139,23 @@ const CartDrawer = ({
                           <h3 className="font-black text-slate-900 text-lg leading-tight">{ci.item.name}</h3>
                           <p className="text-sm font-bold text-slate-400 mt-1">₹{ci.item.price * ci.quantity}</p>
                           
-                          {/* Sugar Toggle */}
-                          <div className="mt-3 flex items-center gap-2">
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                className="sr-only peer"
-                                checked={ci.isSugarFree}
-                                onChange={() => onToggleSugar && onToggleSugar(ci.uniqueKey)}
-                              />
-                              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
-                              <span className={cn("ml-2 text-[10px] font-black uppercase tracking-wider", ci.isSugarFree ? "text-emerald-600" : "text-slate-400")}>
-                                {ci.isSugarFree ? "Sugar Free" : "Regular"}
-                              </span>
-                            </label>
-                          </div>
+                          {/* --- THE BUG FIX: Conditional Check for Sugar Toggle --- */}
+                          {ci.item.is_sugar_free_available && (
+                            <div className="mt-3 flex items-center gap-2">
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  className="sr-only peer"
+                                  checked={ci.isSugarFree}
+                                  onChange={() => onToggleSugar && onToggleSugar(ci.uniqueKey)}
+                                />
+                                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                                <span className={cn("ml-2 text-[10px] font-black uppercase tracking-wider", ci.isSugarFree ? "text-emerald-600" : "text-slate-400")}>
+                                  {ci.isSugarFree ? "Sugar Free" : "Regular Sugar"}
+                                </span>
+                              </label>
+                            </div>
+                          )}
 
                           {!isSingleItem && (
                             <button 
