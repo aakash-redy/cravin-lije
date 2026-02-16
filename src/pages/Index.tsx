@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Search, Leaf, Plus, Minus, ShoppingBag, AlertCircle, Phone, MapPin, Star } from "lucide-react";
+import { Search, Leaf, Plus, Minus, ShoppingBag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -107,16 +107,11 @@ const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSugarFreeMode, setIsSugarFreeMode] = useState(false);
   const [activeCategory, setActiveCategory] = useState("All");
-  const [tapCount, setTapCount] = useState(0);
 
+  // --- CHANGED: REMOVED DOUBLE TAP LOGIC ---
   const handleLogoClick = () => {
+    // Just a simple interaction feedback, no secret access
     if (navigator.vibrate) navigator.vibrate(50);
-    setTapCount(prev => prev + 1);
-    setTimeout(() => setTapCount(0), 1000);
-    if (tapCount + 1 === 2) { 
-      toast({ title: "Secret Access", description: "Entering Owner Portal..." });
-      navigate('/admin');
-    }
   };
 
   useEffect(() => {
@@ -135,11 +130,28 @@ const Index = () => {
     setLoading(false);
   };
 
+  // --- CUSTOM SORTING LOGIC ---
   const categories = useMemo(() => {
     if (menuItems.length === 0) return ["All"];
+    
+    // 1. Filter items based on search
     const filtered = menuItems.filter(i => (i.name.toLowerCase().includes(searchQuery.toLowerCase()) || i.description?.toLowerCase().includes(searchQuery.toLowerCase())));
-    const cats = [...new Set(filtered.map(i => i.category))];
-    return ["All", ...cats.sort()];
+    
+    // 2. Get unique categories
+    const uniqueCats = [...new Set(filtered.map(i => i.category))];
+    
+    // 3. Define the priority category
+    const PRIORITY_CAT = "Daily Specials";
+
+    // 4. Separate priority category from the rest
+    const hasPriority = uniqueCats.includes(PRIORITY_CAT);
+    const otherCats = uniqueCats.filter(c => c !== PRIORITY_CAT).sort(); // Sort others alphabetically
+
+    // 5. Construct final array: All -> Daily Specials -> Others (A-Z)
+    return hasPriority 
+      ? ["All", PRIORITY_CAT, ...otherCats] 
+      : ["All", ...otherCats];
+
   }, [menuItems, searchQuery]);
 
   const handleCategoryClick = (category: string) => {
@@ -196,7 +208,6 @@ const Index = () => {
              </div>
           </div>
 
-          {/* --- ENHANCED SUGAR FREE TOGGLE --- */}
           <button 
             onClick={() => {
               if (navigator.vibrate) navigator.vibrate(20);
@@ -234,6 +245,10 @@ const Index = () => {
       <div className="p-4 space-y-8 mt-2 min-h-[50vh]">
         {loading ? <MenuSkeleton /> : (
           <>
+            {/* This map will now follow the order: 
+               1. Daily Specials (if exists)
+               2. Others (A-Z)
+            */}
             {categories.filter(c => c !== "All").map((cat) => {
               const categoryItems = menuItems.filter(item => 
                 item.category === cat && 
@@ -246,8 +261,9 @@ const Index = () => {
               return (
                 <div key={cat} id={cat} className="scroll-mt-40">
                   <div className="flex items-center gap-3 mb-4 pl-2">
-                    <div className="h-6 w-1 bg-emerald-500 rounded-full" />
-                    <h3 className="text-xl font-black text-slate-900 leading-none">{cat}</h3>
+                    {/* Visual Emphasis for Daily Specials */}
+                    <div className={cn("h-6 w-1 rounded-full", cat === "Daily Specials" ? "bg-amber-400" : "bg-emerald-500")} />
+                    <h3 className={cn("text-xl font-black leading-none", cat === "Daily Specials" ? "text-amber-600" : "text-slate-900")}>{cat}</h3>
                   </div>
                   <div className="grid grid-cols-1 gap-4">
                     {categoryItems.map((item) => (

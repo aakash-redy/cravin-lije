@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { 
   Clock, Trash2, RefreshCw, ChefHat, Coffee, X, Search, 
   BarChart3, TrendingUp, AlertTriangle, Plus, Leaf, Power, 
-  Star, Sparkles, MessageSquare, User, Pencil, Check
+  Star, Sparkles, MessageSquare, User, Pencil, Check, Lock, ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -53,6 +53,7 @@ interface AdminPortalProps {
 }
 
 // --- CONFIGURATION ---
+const PASSCODE = "1234"; // <--- CHANGE YOUR PASSCODE HERE
 const CATEGORIES = [
   "Daily Specials", 
   "Chai", 
@@ -116,7 +117,16 @@ const AdminPortal = ({
   onBack 
 }: AdminPortalProps) => {
   
-  // --- STATE ---
+  // --- AUTHENTICATION STATE (INSTANT CHECK) ---
+  // This function runs BEFORE the screen paints, preventing the "flash"
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem("cravin_admin_session") === "active";
+  });
+  
+  const [inputPasscode, setInputPasscode] = useState("");
+  const [authError, setAuthError] = useState(false);
+
+  // --- APP STATE ---
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'orders' | 'menu' | 'reviews'>('orders');
   const [localMenuItems, setLocalMenuItems] = useState<MenuItem[]>(initialMenuItems);
@@ -140,8 +150,27 @@ const AdminPortal = ({
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editPriceValue, setEditPriceValue] = useState("");
 
-  // --- 1. REALTIME ENGINE ---
+  const handleLogin = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (inputPasscode === PASSCODE) {
+      localStorage.setItem("cravin_admin_session", "active");
+      setIsAuthenticated(true);
+    } else {
+      setAuthError(true);
+      setTimeout(() => setAuthError(false), 500);
+      setInputPasscode("");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("cravin_admin_session");
+    setIsAuthenticated(false);
+  };
+
+  // --- 1. REALTIME ENGINE (Only runs if authenticated) ---
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     const fetchOrders = async () => {
       const { data } = await supabase
         .from('orders')
@@ -162,11 +191,9 @@ const AdminPortal = ({
         (payload: any) => {
           console.log("🔔 New Order!", payload.new);
           
-          // 1. Play Sound (No annoying alert popup)
           const audio = new Audio('/ting.mp3');
           audio.play().catch(e => console.log("Audio requires interaction first"));
 
-          // 2. Add to top of list instantly
           setOrders((prev) => [payload.new as Order, ...prev]);
         }
       )
@@ -175,7 +202,7 @@ const AdminPortal = ({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   // --- 2. ACTIONS ---
   
@@ -213,7 +240,6 @@ const AdminPortal = ({
     } else {
       setOrders([]);
       setShowEndDayReport(false);
-      // No alert needed here either, the screen clearing is enough confirmation
     }
   };
 
@@ -222,8 +248,8 @@ const AdminPortal = ({
   useEffect(() => { setLocalMenuItems(initialMenuItems || []); }, [initialMenuItems]);
 
   useEffect(() => {
-    if (activeTab === 'reviews') fetchReviews();
-  }, [activeTab]);
+    if (activeTab === 'reviews' && isAuthenticated) fetchReviews();
+  }, [activeTab, isAuthenticated]);
 
   const fetchReviews = async () => {
     setLoadingReviews(true);
@@ -324,6 +350,51 @@ const AdminPortal = ({
     return { totalRevenue, totalOrders: orders.length, topItem: sortedItems[0] || { name: "N/A", count: 0 }, itemBreakdown: sortedItems };
   }, [orders, totalRevenue]);
 
+  // --- LOCK SCREEN VIEW ---
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center mb-10">
+            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-4 shadow-xl border border-slate-700">
+              <Lock className="w-8 h-8 text-emerald-500" />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight">Admin Access</h1>
+            <p className="text-slate-400 text-sm font-medium mt-2">Enter your passcode to continue</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="relative">
+              <input 
+                type="password" 
+                value={inputPasscode}
+                onChange={(e) => setInputPasscode(e.target.value)}
+                maxLength={4}
+                className={cx(
+                  "w-full bg-slate-900 border-2 rounded-2xl py-4 px-6 text-center text-3xl font-black tracking-[1em] outline-none transition-all placeholder:text-slate-800",
+                  authError ? "border-red-500 animate-pulse text-red-500" : "border-slate-800 focus:border-emerald-500 text-white"
+                )}
+                placeholder="••••"
+                autoFocus
+              />
+            </div>
+            <button 
+              type="submit"
+              className="w-full bg-emerald-500 text-slate-950 font-black py-4 rounded-2xl active:scale-95 transition-transform flex items-center justify-center gap-2 hover:bg-emerald-400"
+            >
+              UNLOCK <ChevronRight className="w-5 h-5" />
+            </button>
+          </form>
+
+          <button onClick={onBack} className="w-full mt-6 text-slate-600 text-xs font-bold hover:text-white transition-colors">
+            Return to Menu
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- DASHBOARD VIEW (AUTHENTICATED) ---
   return (
     <div className="min-h-screen bg-slate-50 pb-20 font-sans">
       {/* Header */}
@@ -331,7 +402,7 @@ const AdminPortal = ({
         <div className="max-w-3xl mx-auto">
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-4">
-              <button onClick={onBack} className="p-2 hover:bg-slate-800 rounded-full transition-colors"><Power className="w-6 h-6 text-slate-400 hover:text-white" /></button>
+              <button onClick={handleLogout} className="p-2 hover:bg-slate-800 rounded-full transition-colors"><Power className="w-6 h-6 text-slate-400 hover:text-white" /></button>
               <div>
                 <h1 className="text-2xl font-black tracking-tight">Admin Portal</h1>
                 <p className="text-slate-400 text-xs font-bold uppercase tracking-widest flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"/> Live System</p>
