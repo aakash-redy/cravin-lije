@@ -2,14 +2,14 @@ import { useState, useMemo, useEffect } from "react";
 import { 
   Clock, Trash2, RefreshCw, ChefHat, Coffee, X, Search, 
   BarChart3, TrendingUp, AlertTriangle, Plus, Leaf, Power, 
-  Star, Sparkles, MessageSquare, User
+  Star, Sparkles, MessageSquare, User, Pencil, Check
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// --- IMPORTANT: CHECK THIS PATH ---
-// Ensure this points to your supabase client file
-import { supabase } from "../lib/supabase";
-// --- TYPESCRIPT INTERFACES (The Fix for Red Lines) ---
+// --- IMPORTANT: Points to src/lib/supabase.ts ---
+import { supabase } from "../lib/supabase"; 
+
+// --- TYPESCRIPT INTERFACES ---
 interface OrderItem {
   item_name: string;
   quantity: number;
@@ -23,7 +23,7 @@ interface Order {
   created_at: string;
   customer_name: string;
   table_number?: string;
-  status: 'sent' | 'preparing' | 'ready' | 'delivered';
+  status: 'sent' | 'preparing' | 'ready' | 'delivered' | 'archived';
   total_amount: number;
   order_items: OrderItem[];
 }
@@ -54,17 +54,22 @@ interface AdminPortalProps {
 
 // --- CONFIGURATION ---
 const CATEGORIES = [
-  "Daily Specials", "Chai", "Coffee", "Milks", 
-  "Immunity Boosters", "Snacks", "Cakes", 
-  "Coolers", "Desserts", "Maggi & Pasta"
+  "Daily Specials", 
+  "Chai", 
+  "Coffee", 
+  "Milks", 
+  "Immunity Boosters", 
+  "Snacks", 
+  "Cakes", 
+  "Coolers", 
+  "Mojitos",     
+  "Milkshakes"   
 ];
 
 // --- HELPER COMPONENTS ---
 
-// 1. Simple Helper for conditional classes
 const cx = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
-// 2. Custom Toggle Switch
 const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: (c: boolean) => void }) => (
   <button 
     type="button"
@@ -108,18 +113,17 @@ const StarRating = ({ rating }: { rating: number }) => (
 const AdminPortal = ({ 
   menuItems: initialMenuItems = [], 
   onUpdateMenu, 
-  onBack, 
-  onResetSystem 
+  onBack 
 }: AdminPortalProps) => {
   
-  // --- STATE TYPES ---
+  // --- STATE ---
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'orders' | 'menu' | 'reviews'>('orders');
   const [localMenuItems, setLocalMenuItems] = useState<MenuItem[]>(initialMenuItems);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
 
-  // Search & Filter States
+  // Search & Filter
   const [orderSearchQuery, setOrderSearchQuery] = useState("");
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const [filter, setFilter] = useState<string>('all');
@@ -128,9 +132,13 @@ const AdminPortal = ({
   const [showEndDayReport, setShowEndDayReport] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
 
-  // Menu Form
+  // Menu Form & Editing
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItem, setNewItem] = useState({ name: "", price: "", category: "Chai", is_sugar_free_available: true });
+  
+  // Price Editing State
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [editPriceValue, setEditPriceValue] = useState("");
 
   // --- 1. REALTIME ENGINE ---
   useEffect(() => {
@@ -138,6 +146,7 @@ const AdminPortal = ({
       const { data } = await supabase
         .from('orders')
         .select('*')
+        .neq('status', 'archived') 
         .order('created_at', { ascending: false });
       
       if (data) setOrders(data as Order[]);
@@ -153,11 +162,12 @@ const AdminPortal = ({
         (payload: any) => {
           console.log("🔔 New Order!", payload.new);
           
+          // 1. Play Sound (No annoying alert popup)
           const audio = new Audio('/ting.mp3');
           audio.play().catch(e => console.log("Audio requires interaction first"));
 
+          // 2. Add to top of list instantly
           setOrders((prev) => [payload.new as Order, ...prev]);
-          alert(`🔔 NEW ORDER: Table ${payload.new.table_number || 'Takeaway'}`);
         }
       )
       .subscribe();
@@ -171,19 +181,43 @@ const AdminPortal = ({
   
   const handleUpdateStatus = async (id: string, newStatus: Order['status']) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status: newStatus } : o));
-    const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', id);
-    if (error) console.error("Update failed", error);
+    await supabase.from('orders').update({ status: newStatus }).eq('id', id);
   };
 
   const handleDeleteOrder = async (id: string | null) => {
     if (!id) return;
     setOrders(prev => prev.filter(o => o.id !== id));
     setOrderToCancel(null);
-    const { error } = await supabase.from('orders').delete().eq('id', id);
-    if (error) console.error("Delete failed", error);
+    await supabase.from('orders').delete().eq('id', id);
   };
 
-  // --- EXISTING LOGIC ---
+  // --- HANDLE END DAY (ARCHIVE) ---
+  const handleEndDay = async () => {
+    if (!window.confirm("Are you sure? This will clear all orders from the screen.")) return;
+
+    const orderIds = orders.map(o => o.id);
+
+    if (orderIds.length === 0) {
+      setShowEndDayReport(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: 'archived' })
+      .in('id', orderIds);
+
+    if (error) {
+      console.error("Archive failed:", error);
+      alert("Failed to archive orders. Check console.");
+    } else {
+      setOrders([]);
+      setShowEndDayReport(false);
+      // No alert needed here either, the screen clearing is enough confirmation
+    }
+  };
+
+  // --- MENU LOGIC ---
 
   useEffect(() => { setLocalMenuItems(initialMenuItems || []); }, [initialMenuItems]);
 
@@ -198,7 +232,6 @@ const AdminPortal = ({
     setLoadingReviews(false);
   };
 
-  // Menu Logic
   const handleAddItem = async () => {
     if (!newItem.name || !newItem.price) {
       alert("Please enter Name and Price!");
@@ -224,6 +257,22 @@ const AdminPortal = ({
     }
   };
 
+  const startEditingPrice = (item: MenuItem) => {
+    setEditingPriceId(item.id);
+    setEditPriceValue(item.price.toString());
+  };
+
+  const saveNewPrice = async (id: string) => {
+    if (!editPriceValue) return;
+    const newPrice = parseInt(editPriceValue);
+    
+    setLocalMenuItems(prev => prev.map(item => item.id === id ? { ...item, price: newPrice } : item));
+    setEditingPriceId(null);
+
+    await supabase.from('menu_items').update({ price: newPrice }).eq('id', id);
+    if (onUpdateMenu) onUpdateMenu();
+  };
+
   const toggleAvailability = async (id: string, current: boolean) => {
     setLocalMenuItems(prev => prev.map(item => item.id === id ? { ...item, available: !current } : item));
     await supabase.from('menu_items').update({ available: !current }).eq('id', id);
@@ -241,7 +290,7 @@ const AdminPortal = ({
     if (onUpdateMenu) onUpdateMenu();
   };
 
-  // Filtering & Sorting
+  // Filtering
   const filteredOrders = useMemo(() => orders.filter(o => 
     (filter === 'all' || o.status === filter) && 
     (o.customer_name || "").toLowerCase().includes(orderSearchQuery.toLowerCase())
@@ -307,6 +356,7 @@ const AdminPortal = ({
       <div className="p-4 max-w-3xl mx-auto space-y-6">
         {activeTab === 'orders' ? (
           <>
+            {/* Orders View */}
             <div className="space-y-4 sticky top-[180px] z-30 bg-slate-50/95 backdrop-blur-sm py-2">
               <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input type="text" placeholder="Search customer..." value={orderSearchQuery} onChange={(e) => setOrderSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3 rounded-2xl border-none bg-white shadow-sm font-bold outline-none" /></div>
               <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">{['all', 'sent', 'preparing', 'ready'].map((f) => (<button key={f} onClick={() => setFilter(f)} className={cx("px-5 py-2.5 rounded-full text-xs font-black uppercase tracking-wider border transition-all whitespace-nowrap", filter === f ? "bg-slate-900 text-white" : "bg-white text-slate-500")}>{f}</button>))}</div>
@@ -353,14 +403,16 @@ const AdminPortal = ({
                 </AnimatePresence>
               )}
             </div>
-            <div className="fixed bottom-6 left-0 right-0 px-4 flex justify-center z-40 pointer-events-none"><button onClick={() => setShowEndDayReport(true)} className="pointer-events-auto bg-white/90 backdrop-blur-md border border-slate-200 shadow-2xl px-6 py-3 rounded-full flex items-center gap-3 font-bold active:scale-95"><BarChart3 className="w-4 h-4 text-slate-900" /> End Day Report</button></div>
           </>
         ) : activeTab === 'menu' ? (
           <div className="space-y-6 pb-20">
+            {/* Menu View */}
             <div className="sticky top-[180px] z-30 bg-slate-50/95 backdrop-blur-sm py-2">
               <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input type="text" placeholder="Search menu..." value={menuSearchQuery} onChange={(e) => setMenuSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3 rounded-2xl border-none bg-white shadow-sm font-bold outline-none" /></div>
             </div>
+            
             <button onClick={() => setIsAddingItem(!isAddingItem)} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95"><Plus className="w-5 h-5" /> {isAddingItem ? "Cancel" : "Add New Item"}</button>
+            
             <AnimatePresence>{isAddingItem && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} className="overflow-hidden"><div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl space-y-4">
                     <input value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} placeholder="Item Name" className="w-full bg-slate-50 p-3 rounded-xl font-bold outline-none" />
@@ -370,10 +422,30 @@ const AdminPortal = ({
                     <button onClick={handleAddItem} className="w-full py-4 bg-emerald-500 text-white font-black rounded-xl active:scale-95">SAVE ITEM</button>
                   </div></motion.div>
             )}</AnimatePresence>
+            
             <div className="space-y-3">{processedMenuItems.map((item) => (
                   <motion.div layout key={item.id} className={cx("bg-white p-4 rounded-2xl shadow-sm border flex justify-between items-center transition-colors relative overflow-hidden", item.available ? "border-slate-100" : "border-slate-100 bg-slate-50/50", item.category === 'Daily Specials' && "border-amber-200 bg-amber-50/30")}>
                     {item.category === 'Daily Specials' && <div className="absolute top-0 left-0 bg-amber-400 text-amber-900 text-[8px] font-black px-2 py-0.5">SPECIAL</div>}
-                    <div className="flex items-center gap-4"><div className={cx("w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl shadow-inner", item.available ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-400")}>{item.category === 'Daily Specials' ? <Sparkles className="w-6 h-6 text-amber-500" /> : item.name.charAt(0)}</div><div><h4 className={cx("font-bold text-lg leading-tight", !item.available && "text-slate-400 line-through")}>{item.name}</h4><p className="text-xs font-bold text-slate-400 uppercase">₹{item.price} • {item.category}</p></div></div>
+                    <div className="flex items-center gap-4">
+                      <div className={cx("w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl shadow-inner", item.available ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-400")}>{item.category === 'Daily Specials' ? <Sparkles className="w-6 h-6 text-amber-500" /> : item.name.charAt(0)}</div>
+                      <div>
+                        <h4 className={cx("font-bold text-lg leading-tight", !item.available && "text-slate-400 line-through")}>{item.name}</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          {editingPriceId === item.id ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-400">₹</span>
+                              <input type="number" autoFocus value={editPriceValue} onChange={(e) => setEditPriceValue(e.target.value)} className="w-16 bg-slate-100 rounded px-1 py-0.5 text-sm font-bold outline-emerald-500" />
+                              <button onClick={() => saveNewPrice(item.id)} className="bg-emerald-500 text-white p-1 rounded-full hover:bg-emerald-600"><Check className="w-3 h-3" /></button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-xs font-bold text-slate-400 uppercase">₹{item.price} • {item.category}</p>
+                              <button onClick={() => startEditingPrice(item)} className="text-slate-300 hover:text-indigo-500 transition-colors"><Pencil className="w-3 h-3" /></button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-3">
                       <div className="flex flex-col items-center gap-1"><button onClick={() => toggleSugarCapability(item.id, item.is_sugar_free_available)} className={cx("w-8 h-8 rounded-lg flex items-center justify-center", item.is_sugar_free_available ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-300")}><Leaf className="w-4 h-4" /></button><span className="text-[7px] font-black text-slate-300">SF Opt</span></div>
                       <div className="flex flex-col items-center gap-1"><ToggleSwitch checked={item.available} onChange={() => toggleAvailability(item.id, item.available)} /><span className="text-[7px] font-black text-slate-300 uppercase">{item.available ? "Stock" : "Out"}</span></div>
@@ -384,6 +456,7 @@ const AdminPortal = ({
           </div>
         ) : (
           <div className="space-y-6 pb-20">
+            {/* Reviews View */}
             <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden"><div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" /><h3 className="text-sm font-bold text-slate-400 uppercase mb-2 tracking-widest">Average Happiness</h3><div className="flex items-end gap-3"><span className="text-5xl font-black text-yellow-400">{averageRating}</span><div className="pb-2"><StarRating rating={Math.round(Number(averageRating))} /><p className="text-xs font-bold text-slate-500 mt-1">{reviews.length} reviews</p></div></div></div>
             <div className="space-y-4">{loadingReviews ? (<div className="text-center py-10 opacity-50 font-bold">Fetching Reviews...</div>) : reviews.length === 0 ? (<div className="text-center py-20 opacity-50"><MessageSquare className="w-12 h-12 mx-auto mb-2 text-slate-200" /><p className="font-bold text-slate-400">No reviews yet</p></div>) : (
                 reviews.map((r) => (<motion.div initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} key={r.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm"><div className="flex justify-between items-start mb-3"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center"><User className="w-5 h-5 text-slate-400" /></div><div><h4 className="font-black text-slate-900">{r.customer_name || "Guest"}</h4><p className="text-[10px] font-bold text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p></div></div><div className="bg-yellow-50 px-3 py-1 rounded-xl flex items-center gap-1 font-black text-yellow-600 text-sm">{r.rating}.0 <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" /></div></div><p className="text-sm font-bold text-slate-600 leading-relaxed italic border-l-2 border-slate-100 pl-4">"{r.comment}"</p></motion.div>))
@@ -392,12 +465,18 @@ const AdminPortal = ({
         )}
       </div>
 
+      <div className="fixed bottom-6 left-0 right-0 px-4 flex justify-center z-40 pointer-events-none"><button onClick={() => setShowEndDayReport(true)} className="pointer-events-auto bg-white/90 backdrop-blur-md border border-slate-200 shadow-2xl px-6 py-3 rounded-full flex items-center gap-3 font-bold active:scale-95"><BarChart3 className="w-4 h-4 text-slate-900" /> End Day Report</button></div>
+
       <AnimatePresence>{showEndDayReport && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center px-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowEndDayReport(false)} /><motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl relative z-10">
               <div className="bg-slate-900 p-8 text-white relative"><button onClick={() => setShowEndDayReport(false)} className="absolute top-6 right-6 p-2 bg-white/10 rounded-full"><X className="w-5 h-5" /></button><h2 className="text-2xl font-black mb-1">Daily Summary</h2><div className="mt-8 grid grid-cols-2 gap-4"><div className="bg-white/10 p-4 rounded-2xl backdrop-blur-md"><p className="text-xs font-bold text-slate-400 uppercase">Sales</p><p className="text-2xl font-black text-emerald-400 mt-1">₹{totalRevenue}</p></div><div className="bg-white/10 p-4 rounded-2xl backdrop-blur-md"><p className="text-xs font-bold text-slate-400 uppercase">Orders</p><p className="text-2xl font-black text-white mt-1">{orders.length}</p></div></div></div>
               <div className="p-8"><div className="mb-6"><h3 className="text-sm font-black text-slate-900 uppercase mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-amber-500" /> Top Seller</h3><div className="bg-amber-50 p-4 rounded-2xl flex justify-between border border-amber-100"><span className="font-bold">{endDayStats.topItem.name}</span><span className="font-black text-amber-600">{endDayStats.topItem.count} Sold</span></div></div>
                 <div className="max-h-[150px] overflow-y-auto space-y-2 mb-8">{endDayStats.itemBreakdown.map((item, idx) => (<div key={idx} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded-lg"><span className="text-slate-600">{item.name}</span><span className="font-bold">{item.count}</span></div>))}</div>
-                <button onClick={() => { if(window.confirm("Archive all orders?")) { if(onResetSystem) onResetSystem(); setShowEndDayReport(false); } }} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"><RefreshCw className="w-4 h-4" /> CLOSE DAY & RESET</button>
+                
+                {/* --- END DAY BUTTON --- */}
+                <button onClick={handleEndDay} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-all">
+                  <RefreshCw className="w-4 h-4" /> CLOSE DAY & RESET
+                </button>
               </div></motion.div></div>
       )}</AnimatePresence>
 
