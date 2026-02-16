@@ -53,7 +53,9 @@ interface AdminPortalProps {
 }
 
 // --- CONFIGURATION ---
-const PASSCODE = "admin123"; // <--- CHANGE YOUR PASSWORD HERE (Any length!)
+// UPDATED: Now using your Environment Variable
+const PASSCODE = import.meta.env.VITE_ADMIN_PIN || "1234"; 
+
 const CATEGORIES = [
   "Daily Specials", 
   "Chai", 
@@ -151,6 +153,7 @@ const AdminPortal = ({
 
   const handleLogin = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    // UPDATED: Checks against the environment variable
     if (inputPasscode === PASSCODE) {
       localStorage.setItem("cravin_admin_session", "active");
       setIsAuthenticated(true);
@@ -368,13 +371,11 @@ const AdminPortal = ({
                 type="password" 
                 value={inputPasscode}
                 onChange={(e) => setInputPasscode(e.target.value)}
-                // Removed maxLength
                 className={cx(
-                  // Changed tracking to widest instead of [1em] for better readability of passwords
                   "w-full bg-slate-900 border-2 rounded-2xl py-4 px-6 text-center text-xl font-bold tracking-widest outline-none transition-all placeholder:text-slate-800",
                   authError ? "border-red-500 animate-pulse text-red-500" : "border-slate-800 focus:border-emerald-500 text-white"
                 )}
-                placeholder="Enter Password" // Better placeholder
+                placeholder="Enter Password"
                 autoFocus
               />
             </div>
