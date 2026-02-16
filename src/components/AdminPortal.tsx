@@ -53,7 +53,7 @@ interface AdminPortalProps {
 }
 
 // --- CONFIGURATION ---
-const PASSCODE = "1234"; // <--- CHANGE YOUR PASSCODE HERE
+const PASSCODE = "admin123"; // <--- CHANGE YOUR PASSWORD HERE (Any length!)
 const CATEGORIES = [
   "Daily Specials", 
   "Chai", 
@@ -118,7 +118,6 @@ const AdminPortal = ({
 }: AdminPortalProps) => {
   
   // --- AUTHENTICATION STATE (INSTANT CHECK) ---
-  // This function runs BEFORE the screen paints, preventing the "flash"
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem("cravin_admin_session") === "active";
   });
@@ -360,7 +359,7 @@ const AdminPortal = ({
               <Lock className="w-8 h-8 text-emerald-500" />
             </div>
             <h1 className="text-2xl font-black tracking-tight">Admin Access</h1>
-            <p className="text-slate-400 text-sm font-medium mt-2">Enter your passcode to continue</p>
+            <p className="text-slate-400 text-sm font-medium mt-2">Enter your password to continue</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -369,12 +368,13 @@ const AdminPortal = ({
                 type="password" 
                 value={inputPasscode}
                 onChange={(e) => setInputPasscode(e.target.value)}
-                maxLength={4}
+                // Removed maxLength
                 className={cx(
-                  "w-full bg-slate-900 border-2 rounded-2xl py-4 px-6 text-center text-3xl font-black tracking-[1em] outline-none transition-all placeholder:text-slate-800",
+                  // Changed tracking to widest instead of [1em] for better readability of passwords
+                  "w-full bg-slate-900 border-2 rounded-2xl py-4 px-6 text-center text-xl font-bold tracking-widest outline-none transition-all placeholder:text-slate-800",
                   authError ? "border-red-500 animate-pulse text-red-500" : "border-slate-800 focus:border-emerald-500 text-white"
                 )}
-                placeholder="••••"
+                placeholder="Enter Password" // Better placeholder
                 autoFocus
               />
             </div>
