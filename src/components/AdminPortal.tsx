@@ -5,8 +5,6 @@ import {
   Star, Sparkles, MessageSquare, User, Pencil, Check, Lock, ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-
-// --- IMPORTANT: Points to src/lib/supabase.ts ---
 import { supabase } from "../lib/supabase"; 
 
 // --- TYPESCRIPT INTERFACES ---
@@ -37,123 +35,78 @@ interface MenuItem {
   is_sugar_free_available: boolean;
 }
 
-interface Review {
-  id: string;
-  created_at: string;
-  customer_name: string;
-  rating: number;
-  comment: string;
-}
-
 interface AdminPortalProps {
-  menuItems: MenuItem[];
-  onUpdateMenu?: () => void;
   onBack: () => void;
-  onResetSystem?: () => void;
+  onUpdateMenu?: () => void;
 }
 
-// --- CONFIGURATION ---
-// UPDATED: Now using your Environment Variable
 const PASSCODE = import.meta.env.VITE_ADMIN_PIN || "1234"; 
-
-const CATEGORIES = [
-  "Daily Specials", 
-  "Chai", 
-  "Coffee", 
-  "Milks", 
-  "Immunity Boosters", 
-  "Snacks", 
-  "Cakes", 
-  "Coolers", 
-  "Mojitos",     
-  "Milkshakes"   
-];
+const CATEGORIES = ["Daily Specials", "Chai", "Coffee", "Milks", "Immunity Boosters", "Snacks", "Cakes", "Coolers", "Mojitos", "Milkshakes"];
 
 // --- HELPER COMPONENTS ---
 
 const cx = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
-const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: (c: boolean) => void }) => (
-  <button 
-    type="button"
-    onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
-    className={cx(
-      "w-10 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out focus:outline-none",
-      checked ? "bg-emerald-500" : "bg-slate-200"
-    )}
-  >
-    <div className={cx(
-      "w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-200",
-      checked ? "translate-x-4" : "translate-x-0"
-    )} />
-  </button>
-);
-
-const StatusBadge = ({ status }: { status: string }) => {
+// RESTORED: StatusBadge Component
+const StatusBadge = ({ status }: { status: Order['status'] | string }) => {
   const styles: Record<string, string> = {
     sent: "bg-slate-100 text-slate-600 border-slate-200",
     preparing: "bg-amber-100 text-amber-700 border-amber-200",
     ready: "bg-emerald-100 text-emerald-700 border-emerald-200",
     delivered: "bg-blue-100 text-blue-700 border-blue-200",
+    archived: "bg-slate-200 text-slate-400 border-slate-300"
   };
+  
   return (
-    <span className={cx("px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border", styles[status] || styles.sent)}>
+    <span className={cx(
+      "px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border", 
+      styles[status] || styles.sent
+    )}>
       {status}
     </span>
   );
 };
 
-const StarRating = ({ rating }: { rating: number }) => (
-  <div className="flex gap-0.5">
-    {[1, 2, 3, 4, 5].map((star) => (
-      <Star key={star} className={cx("w-3 h-3", star <= rating ? "fill-yellow-400 text-yellow-400" : "text-slate-200")} />
-    ))}
-  </div>
-);
-
 // --- MAIN COMPONENT ---
-
-const AdminPortal = ({ 
-  menuItems: initialMenuItems = [], 
-  onUpdateMenu, 
-  onBack 
-}: AdminPortalProps) => {
+const AdminPortal = ({ onBack }: AdminPortalProps) => {
   
-  // --- AUTHENTICATION STATE (INSTANT CHECK) ---
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem("cravin_admin_session") === "active";
-  });
-  
+  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem("cravin_admin_session") === "active");
   const [inputPasscode, setInputPasscode] = useState("");
   const [authError, setAuthError] = useState(false);
 
-  // --- APP STATE ---
   const [orders, setOrders] = useState<Order[]>([]);
-  const [activeTab, setActiveTab] = useState<'orders' | 'menu' | 'reviews'>('orders');
-  const [localMenuItems, setLocalMenuItems] = useState<MenuItem[]>(initialMenuItems);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [loadingReviews, setLoadingReviews] = useState(false);
-
-  // Search & Filter
+  const [activeTab, setActiveTab] = useState<'orders' | 'menu'>('orders');
+  const [localMenuItems, setLocalMenuItems] = useState<MenuItem[]>([]);
   const [orderSearchQuery, setOrderSearchQuery] = useState("");
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const [filter, setFilter] = useState<string>('all');
-  
-  // Modals
   const [showEndDayReport, setShowEndDayReport] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
 
-  // Menu Form & Editing
-  const [isAddingItem, setIsAddingItem] = useState(false);
-  const [newItem, setNewItem] = useState({ name: "", price: "", category: "Chai", is_sugar_free_available: true });
-  
-  // Price Editing State
-  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
-  const [editPriceValue, setEditPriceValue] = useState("");
+  // --- DATA ENGINE ---
+  const fetchData = async () => {
+    if (!isAuthenticated) return;
+    const { data: oData } = await supabase.from('orders').select('*').neq('status', 'archived').order('created_at', { ascending: false });
+    if (oData) setOrders(oData as Order[]);
+    const { data: mData } = await supabase.from('menu_items').select('*').order('name');
+    if (mData) setLocalMenuItems(mData as MenuItem[]);
+  };
 
+  useEffect(() => {
+    fetchData();
+    const channel = supabase.channel('admin-sync')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
+          new Audio('/ting.mp3').play().catch(() => {});
+          setOrders(prev => [payload.new as Order, ...prev]);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, fetchData)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [isAuthenticated]);
+
+  // --- ACTIONS ---
   const handleLogin = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    // UPDATED: Checks against the environment variable
     if (inputPasscode === PASSCODE) {
       localStorage.setItem("cravin_admin_session", "active");
       setIsAuthenticated(true);
@@ -164,171 +117,38 @@ const AdminPortal = ({
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("cravin_admin_session");
-    setIsAuthenticated(false);
-  };
-
-  // --- 1. REALTIME ENGINE (Only runs if authenticated) ---
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const fetchOrders = async () => {
-      const { data } = await supabase
-        .from('orders')
-        .select('*')
-        .neq('status', 'archived') 
-        .order('created_at', { ascending: false });
-      
-      if (data) setOrders(data as Order[]);
-    };
-
-    fetchOrders();
-
-    const channel = supabase
-      .channel('realtime-orders-admin')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'orders' },
-        (payload: any) => {
-          console.log("🔔 New Order!", payload.new);
-          
-          const audio = new Audio('/ting.mp3');
-          audio.play().catch(e => console.log("Audio requires interaction first"));
-
-          setOrders((prev) => [payload.new as Order, ...prev]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [isAuthenticated]);
-
-  // --- 2. ACTIONS ---
-  
   const handleUpdateStatus = async (id: string, newStatus: Order['status']) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status: newStatus } : o));
     await supabase.from('orders').update({ status: newStatus }).eq('id', id);
   };
 
-  const handleDeleteOrder = async (id: string | null) => {
-    if (!id) return;
-    setOrders(prev => prev.filter(o => o.id !== id));
+  const handleCancelOrder = async () => {
+    if (!orderToCancel) return;
+    const idToCancel = orderToCancel;
+    setOrders(prev => prev.filter(o => o.id !== idToCancel));
     setOrderToCancel(null);
-    await supabase.from('orders').delete().eq('id', id);
+    // Soft archive for customer tracking safety
+    await supabase.from('orders').update({ status: 'archived' }).eq('id', idToCancel);
   };
 
-  // --- HANDLE END DAY (ARCHIVE) ---
   const handleEndDay = async () => {
-    if (!window.confirm("Are you sure? This will clear all orders from the screen.")) return;
-
-    const orderIds = orders.map(o => o.id);
-
-    if (orderIds.length === 0) {
-      setShowEndDayReport(false);
-      return;
-    }
-
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: 'archived' })
-      .in('id', orderIds);
-
-    if (error) {
-      console.error("Archive failed:", error);
-      alert("Failed to archive orders. Check console.");
-    } else {
-      setOrders([]);
-      setShowEndDayReport(false);
-    }
+    if (!window.confirm("Archive all current orders?")) return;
+    const ids = orders.map(o => o.id);
+    if (ids.length > 0) await supabase.from('orders').update({ status: 'archived' }).in('id', ids);
+    setOrders([]);
+    setShowEndDayReport(false);
   };
 
-  // --- MENU LOGIC ---
-
-  useEffect(() => { setLocalMenuItems(initialMenuItems || []); }, [initialMenuItems]);
-
-  useEffect(() => {
-    if (activeTab === 'reviews' && isAuthenticated) fetchReviews();
-  }, [activeTab, isAuthenticated]);
-
-  const fetchReviews = async () => {
-    setLoadingReviews(true);
-    const { data } = await supabase.from('feedback').select('*').order('created_at', { ascending: false });
-    if (data) setReviews(data as Review[]);
-    setLoadingReviews(false);
-  };
-
-  const handleAddItem = async () => {
-    if (!newItem.name || !newItem.price) {
-      alert("Please enter Name and Price!");
-      return;
-    }
-    const itemPayload = { 
-      name: newItem.name, 
-      price: parseInt(newItem.price), 
-      category: newItem.category, 
-      is_sugar_free_available: newItem.is_sugar_free_available, 
-      available: true 
-    };
-    
-    const { error } = await supabase.from('menu_items').insert([itemPayload]);
-    if (!error) {
-      alert("Item Added!");
-      setIsAddingItem(false);
-      setNewItem({ name: "", price: "", category: "Chai", is_sugar_free_available: true });
-      if (onUpdateMenu) onUpdateMenu();
-    } else {
-      console.error(error);
-      alert("Error adding item");
-    }
-  };
-
-  const startEditingPrice = (item: MenuItem) => {
-    setEditingPriceId(item.id);
-    setEditPriceValue(item.price.toString());
-  };
-
-  const saveNewPrice = async (id: string) => {
-    if (!editPriceValue) return;
-    const newPrice = parseInt(editPriceValue);
-    
-    setLocalMenuItems(prev => prev.map(item => item.id === id ? { ...item, price: newPrice } : item));
-    setEditingPriceId(null);
-
-    await supabase.from('menu_items').update({ price: newPrice }).eq('id', id);
-    if (onUpdateMenu) onUpdateMenu();
-  };
-
-  const toggleAvailability = async (id: string, current: boolean) => {
-    setLocalMenuItems(prev => prev.map(item => item.id === id ? { ...item, available: !current } : item));
+  const toggleStock = async (id: string, current: boolean) => {
+    setLocalMenuItems(prev => prev.map(i => i.id === id ? { ...i, available: !current } : i));
     await supabase.from('menu_items').update({ available: !current }).eq('id', id);
   };
 
-  const toggleSugarCapability = async (id: string, current: boolean) => {
-    setLocalMenuItems(prev => prev.map(item => item.id === id ? { ...item, is_sugar_free_available: !current } : item));
-    await supabase.from('menu_items').update({ is_sugar_free_available: !current }).eq('id', id);
-  };
-
-  const deleteMenuItem = async (id: string) => {
-    if (!window.confirm("Delete this item?")) return;
-    setLocalMenuItems(prev => prev.filter(i => i.id !== id));
-    await supabase.from('menu_items').delete().eq('id', id);
-    if (onUpdateMenu) onUpdateMenu();
-  };
-
-  // Filtering
-  const filteredOrders = useMemo(() => orders.filter(o => 
-    (filter === 'all' || o.status === filter) && 
-    (o.customer_name || "").toLowerCase().includes(orderSearchQuery.toLowerCase())
-  ), [orders, filter, orderSearchQuery]);
-
+  // --- CALCULATIONS ---
+  const filteredOrders = useMemo(() => orders.filter(o => (filter === 'all' || o.status === filter) && (o.customer_name || "").toLowerCase().includes(orderSearchQuery.toLowerCase())), [orders, filter, orderSearchQuery]);
+  
   const processedMenuItems = useMemo(() => {
-    let items = localMenuItems.filter((item) => 
-      item.name.toLowerCase().includes(menuSearchQuery.toLowerCase()) || 
-      item.category.toLowerCase().includes(menuSearchQuery.toLowerCase())
-    );
+    let items = localMenuItems.filter(i => i.name.toLowerCase().includes(menuSearchQuery.toLowerCase()) || i.category.toLowerCase().includes(menuSearchQuery.toLowerCase()));
     return items.sort((a, b) => {
       if (a.category === 'Daily Specials' && b.category !== 'Daily Specials') return -1;
       if (a.category !== 'Daily Specials' && b.category === 'Daily Specials') return 1;
@@ -336,238 +156,154 @@ const AdminPortal = ({
     });
   }, [localMenuItems, menuSearchQuery]);
 
-  const averageRating = useMemo(() => reviews.length === 0 ? 0 : (reviews.reduce((acc, r) => acc + (r.rating || 0), 0) / reviews.length).toFixed(1), [reviews]);
   const totalRevenue = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-  
   const endDayStats = useMemo(() => {
-    const itemCounts: Record<string, number> = {};
-    orders.forEach(order => {
-        const items = order.order_items || [];
-        items.forEach((item) => { 
-            const name = item.item_name || "Unknown";
-            itemCounts[name] = (itemCounts[name] || 0) + (item.quantity || 1); 
-        });
-    });
-    const sortedItems = Object.entries(itemCounts).sort(([, a], [, b]) => b - a).map(([name, count]) => ({ name, count }));
-    return { totalRevenue, totalOrders: orders.length, topItem: sortedItems[0] || { name: "N/A", count: 0 }, itemBreakdown: sortedItems };
-  }, [orders, totalRevenue]);
+    const counts: Record<string, number> = {};
+    orders.forEach(o => o.order_items?.forEach(i => { counts[i.item_name] = (counts[i.item_name] || 0) + i.quantity; }));
+    const sorted = Object.entries(counts).sort(([, a], [, b]) => b - a).map(([name, count]) => ({ name, count }));
+    return { top: sorted[0] || { name: "N/A", count: 0 }, list: sorted };
+  }, [orders]);
 
-  // --- LOCK SCREEN VIEW ---
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white">
-        <div className="w-full max-w-sm">
-          <div className="flex flex-col items-center mb-10">
-            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-4 shadow-xl border border-slate-700">
-              <Lock className="w-8 h-8 text-emerald-500" />
-            </div>
-            <h1 className="text-2xl font-black tracking-tight">Admin Access</h1>
-            <p className="text-slate-400 text-sm font-medium mt-2">Enter your password to continue</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="relative">
-              <input 
-                type="password" 
-                value={inputPasscode}
-                onChange={(e) => setInputPasscode(e.target.value)}
-                className={cx(
-                  "w-full bg-slate-900 border-2 rounded-2xl py-4 px-6 text-center text-xl font-bold tracking-widest outline-none transition-all placeholder:text-slate-800",
-                  authError ? "border-red-500 animate-pulse text-red-500" : "border-slate-800 focus:border-emerald-500 text-white"
-                )}
-                placeholder="Enter Password"
-                autoFocus
-              />
-            </div>
-            <button 
-              type="submit"
-              className="w-full bg-emerald-500 text-slate-950 font-black py-4 rounded-2xl active:scale-95 transition-transform flex items-center justify-center gap-2 hover:bg-emerald-400"
-            >
-              UNLOCK <ChevronRight className="w-5 h-5" />
-            </button>
-          </form>
-
-          <button onClick={onBack} className="w-full mt-6 text-slate-600 text-xs font-bold hover:text-white transition-colors">
-            Return to Menu
-          </button>
-        </div>
+  if (!isAuthenticated) return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-white">
+      <div className="w-full max-w-sm text-center">
+        <Lock className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+        <h1 className="text-2xl font-black mb-6 tracking-tight">Owner Access</h1>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <input type="password" value={inputPasscode} onChange={e => setInputPasscode(e.target.value)} className={cx("w-full bg-slate-900 border-2 rounded-2xl py-4 text-center text-xl font-bold tracking-widest outline-none transition-all", authError ? "border-red-500 animate-shake" : "border-slate-800 focus:border-emerald-500")} placeholder="PASSWORD" autoFocus />
+          <button className="w-full bg-emerald-500 text-slate-950 font-black py-4 rounded-2xl active:scale-95 transition-transform">UNLOCK SYSTEM</button>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // --- DASHBOARD VIEW (AUTHENTICATED) ---
   return (
-    <div className="min-h-screen bg-slate-50 pb-20 font-sans">
-      {/* Header */}
-      <div className="bg-slate-900 text-white p-6 sticky top-0 z-40 shadow-xl rounded-b-[2rem]">
-        <div className="max-w-3xl mx-auto">
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center gap-4">
-              <button onClick={handleLogout} className="p-2 hover:bg-slate-800 rounded-full transition-colors"><Power className="w-6 h-6 text-slate-400 hover:text-white" /></button>
-              <div>
-                <h1 className="text-2xl font-black tracking-tight">Admin Portal</h1>
-                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"/> Live System</p>
-              </div>
-            </div>
-            <div className="text-right"><p className="text-xs text-slate-400 font-bold uppercase">Sales Today</p><p className="text-3xl font-black text-emerald-400">₹{totalRevenue}</p></div>
+    <div className="min-h-screen bg-slate-50 pb-24 font-sans">
+      <div className="bg-slate-900 text-white p-6 sticky top-0 z-40 rounded-b-[2.5rem] shadow-xl">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <button onClick={() => { localStorage.removeItem("cravin_admin_session"); setIsAuthenticated(false); onBack(); }} className="p-2 bg-slate-800 rounded-full hover:bg-red-500/20 transition-colors"><Power className="w-5 h-5 text-red-400" /></button>
+            <h1 className="text-xl font-black tracking-tight">Cravin Portal</h1>
           </div>
-          <div className="flex gap-2 bg-slate-800/50 p-1.5 rounded-2xl backdrop-blur-sm">
-            <button onClick={() => setActiveTab('orders')} className={cx("flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}>
-              <ChefHat className="w-4 h-4" /> Orders {orders.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{orders.length}</span>}
-            </button>
-            <button onClick={() => setActiveTab('menu')} className={cx("flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}>
-              <Coffee className="w-4 h-4" /> Menu
-            </button>
-            <button onClick={() => setActiveTab('reviews')} className={cx("flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'reviews' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}>
-              <MessageSquare className="w-4 h-4" /> Reviews
-            </button>
+          <div className="text-right">
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Revenue Today</p>
+            <p className="text-2xl font-black text-emerald-400">₹{totalRevenue}</p>
           </div>
+        </div>
+        <div className="flex gap-2 bg-slate-800/50 p-1 rounded-2xl backdrop-blur-sm">
+          <button onClick={() => setActiveTab('orders')} className={cx("flex-1 py-2.5 rounded-xl font-bold text-sm transition-all", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}>Orders ({orders.length})</button>
+          <button onClick={() => setActiveTab('menu')} className={cx("flex-1 py-2.5 rounded-xl font-bold text-sm transition-all", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}>Menu Manager</button>
         </div>
       </div>
 
-      <div className="p-4 max-w-3xl mx-auto space-y-6">
+      <div className="p-4 max-w-3xl mx-auto space-y-4">
         {activeTab === 'orders' ? (
-          <>
-            {/* Orders View */}
-            <div className="space-y-4 sticky top-[180px] z-30 bg-slate-50/95 backdrop-blur-sm py-2">
-              <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input type="text" placeholder="Search customer..." value={orderSearchQuery} onChange={(e) => setOrderSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3 rounded-2xl border-none bg-white shadow-sm font-bold outline-none" /></div>
-              <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">{['all', 'sent', 'preparing', 'ready'].map((f) => (<button key={f} onClick={() => setFilter(f)} className={cx("px-5 py-2.5 rounded-full text-xs font-black uppercase tracking-wider border transition-all whitespace-nowrap", filter === f ? "bg-slate-900 text-white" : "bg-white text-slate-500")}>{f}</button>))}</div>
-            </div>
-            <div className="space-y-4 pb-24">
-              {filteredOrders.length === 0 ? (<div className="text-center py-20 flex flex-col items-center"><Search className="w-8 h-8 text-slate-300 mb-4" /><h3 className="text-lg font-bold text-slate-900">No orders found</h3></div>) : (
-                <AnimatePresence>
-                  {filteredOrders.map((order) => (
-                    <motion.div layout key={order.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
-                      <div className={cx("absolute left-0 top-0 bottom-0 w-1.5", order.status === 'ready' ? "bg-emerald-500" : order.status === 'preparing' ? "bg-amber-400" : "bg-slate-200")} />
-                      <div className="pl-2">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <div className="flex items-center gap-3">
-                              <h3 className="text-xl font-black text-slate-900">{order.customer_name || `Table ${order.table_number}`}</h3>
-                              <StatusBadge status={order.status} />
-                            </div>
-                            <p className="text-xs font-bold text-slate-400 mt-1 flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </p>
-                          </div>
-                          <p className="text-2xl font-black text-slate-900">₹{order.total_amount}</p>
-                        </div>
-                        <div className="space-y-3 mb-6 bg-slate-50/50 p-4 rounded-2xl">
-                          {order.order_items?.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-start text-sm">
-                              <div className="flex gap-3">
-                                <span className="font-black text-slate-400 bg-white w-6 h-6 rounded flex items-center justify-center text-xs">{item.quantity}</span>
-                                <div><span className="font-bold text-slate-700">{item.item_name}</span>{item.is_sugar_free && <span className="ml-2 text-[9px] bg-emerald-100 text-emerald-700 px-1 rounded">SF</span>}</div>
-                              </div>
-                              <span className="font-bold text-slate-400">₹{(item.price_at_time_of_order || item.price) * item.quantity}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {order.status === 'sent' && <button onClick={() => handleUpdateStatus(order.id, 'preparing')} className="col-span-2 bg-amber-400 text-amber-950 py-3.5 rounded-xl font-black active:scale-95">START COOKING</button>}
-                          {order.status === 'preparing' && <button onClick={() => handleUpdateStatus(order.id, 'ready')} className="col-span-2 bg-emerald-500 text-white py-3.5 rounded-xl font-black active:scale-95">MARK READY</button>}
-                          {order.status === 'ready' && <button onClick={() => handleUpdateStatus(order.id, 'delivered')} className="col-span-2 bg-slate-900 text-white py-3.5 rounded-xl font-black active:scale-95">COMPLETE ORDER</button>}
-                          <button onClick={() => setOrderToCancel(order.id)} className="col-span-2 text-[10px] font-bold text-slate-300 py-2 hover:text-red-500 transition-colors"><Trash2 className="w-3 h-3 inline mr-1" /> Cancel Order</button>
-                        </div>
-                      </div>
-                    </motion.div>
-                ))}
-                </AnimatePresence>
-              )}
-            </div>
-          </>
-        ) : activeTab === 'menu' ? (
-          <div className="space-y-6 pb-20">
-            {/* Menu View */}
-            <div className="sticky top-[180px] z-30 bg-slate-50/95 backdrop-blur-sm py-2">
-              <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input type="text" placeholder="Search menu..." value={menuSearchQuery} onChange={(e) => setMenuSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3 rounded-2xl border-none bg-white shadow-sm font-bold outline-none" /></div>
-            </div>
-            
-            <button onClick={() => setIsAddingItem(!isAddingItem)} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95"><Plus className="w-5 h-5" /> {isAddingItem ? "Cancel" : "Add New Item"}</button>
-            
-            <AnimatePresence>{isAddingItem && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} className="overflow-hidden"><div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl space-y-4">
-                    <input value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} placeholder="Item Name" className="w-full bg-slate-50 p-3 rounded-xl font-bold outline-none" />
-                    <div className="flex gap-4"><input type="number" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} placeholder="Price" className="w-full bg-slate-50 p-3 rounded-xl font-bold outline-none flex-1" /><select value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})} className="bg-slate-50 p-3 rounded-xl font-bold outline-none flex-1">{CATEGORIES.map(cat => <option key={cat}>{cat}</option>)}</select></div>
-                    <div className="flex items-center justify-between bg-emerald-50 p-4 rounded-xl"><div><p className="text-xs font-black text-emerald-800 uppercase">Sugar Free?</p></div>
-                    <ToggleSwitch checked={newItem.is_sugar_free_available} onChange={(c) => setNewItem({...newItem, is_sugar_free_available: c})} /></div>
-                    <button onClick={handleAddItem} className="w-full py-4 bg-emerald-500 text-white font-black rounded-xl active:scale-95">SAVE ITEM</button>
-                  </div></motion.div>
-            )}</AnimatePresence>
-            
-            <div className="space-y-3">{processedMenuItems.map((item) => (
-                  <motion.div layout key={item.id} className={cx("bg-white p-4 rounded-2xl shadow-sm border flex justify-between items-center transition-colors relative overflow-hidden", item.available ? "border-slate-100" : "border-slate-100 bg-slate-50/50", item.category === 'Daily Specials' && "border-amber-200 bg-amber-50/30")}>
-                    {item.category === 'Daily Specials' && <div className="absolute top-0 left-0 bg-amber-400 text-amber-900 text-[8px] font-black px-2 py-0.5">SPECIAL</div>}
-                    <div className="flex items-center gap-4">
-                      <div className={cx("w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl shadow-inner", item.available ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-400")}>{item.category === 'Daily Specials' ? <Sparkles className="w-6 h-6 text-amber-500" /> : item.name.charAt(0)}</div>
-                      <div>
-                        <h4 className={cx("font-bold text-lg leading-tight", !item.available && "text-slate-400 line-through")}>{item.name}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          {editingPriceId === item.id ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-slate-400">₹</span>
-                              <input type="number" autoFocus value={editPriceValue} onChange={(e) => setEditPriceValue(e.target.value)} className="w-16 bg-slate-100 rounded px-1 py-0.5 text-sm font-bold outline-emerald-500" />
-                              <button onClick={() => saveNewPrice(item.id)} className="bg-emerald-500 text-white p-1 rounded-full hover:bg-emerald-600"><Check className="w-3 h-3" /></button>
-                            </div>
-                          ) : (
-                            <>
-                              <p className="text-xs font-bold text-slate-400 uppercase">₹{item.price} • {item.category}</p>
-                              <button onClick={() => startEditingPrice(item)} className="text-slate-300 hover:text-indigo-500 transition-colors"><Pencil className="w-3 h-3" /></button>
-                            </>
-                          )}
-                        </div>
-                      </div>
+          filteredOrders.length === 0 ? (
+            <div className="text-center py-20 opacity-40 font-bold uppercase tracking-widest text-xs">No Active Orders</div>
+          ) : (
+            filteredOrders.map(order => (
+              <motion.div layout key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 relative overflow-hidden">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">{order.customer_name}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <StatusBadge status={order.status} />
+                      <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Clock className="w-3 h-3"/> {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex flex-col items-center gap-1"><button onClick={() => toggleSugarCapability(item.id, item.is_sugar_free_available)} className={cx("w-8 h-8 rounded-lg flex items-center justify-center", item.is_sugar_free_available ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-300")}><Leaf className="w-4 h-4" /></button><span className="text-[7px] font-black text-slate-300">SF Opt</span></div>
-                      <div className="flex flex-col items-center gap-1"><ToggleSwitch checked={item.available} onChange={() => toggleAvailability(item.id, item.available)} /><span className="text-[7px] font-black text-slate-300 uppercase">{item.available ? "Stock" : "Out"}</span></div>
-                      <button onClick={() => deleteMenuItem(item.id)} className="p-2 text-slate-300 hover:text-red-500"><Trash2 className="w-5 h-5" /></button>
+                  </div>
+                  <p className="text-xl font-black text-slate-900">₹{order.total_amount}</p>
+                </div>
+                <div className="bg-slate-50/80 p-4 rounded-2xl mb-4 space-y-2 border border-slate-100">
+                  {order.order_items?.map((item, i) => (
+                    <div key={i} className="flex justify-between text-sm font-bold text-slate-600">
+                      <span>{item.quantity}x {item.item_name} {item.is_sugar_free && <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1 rounded ml-1">SF</span>}</span>
+                      <span className="text-slate-400">₹{item.price * item.quantity}</span>
                     </div>
-                  </motion.div>
-            ))}</div>
-          </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {order.status === 'sent' && <button onClick={() => handleUpdateStatus(order.id, 'preparing')} className="col-span-2 bg-amber-400 text-amber-950 py-3.5 rounded-xl font-black active:scale-95 transition-transform">START PREPARING</button>}
+                  {order.status === 'preparing' && <button onClick={() => handleUpdateStatus(order.id, 'ready')} className="col-span-2 bg-emerald-500 text-white py-3.5 rounded-xl font-black active:scale-95 transition-transform">MARK AS READY</button>}
+                  {order.status === 'ready' && <button onClick={() => handleUpdateStatus(order.id, 'delivered')} className="col-span-2 bg-slate-900 text-white py-3.5 rounded-xl font-black active:scale-95 transition-transform">ORDER DELIVERED</button>}
+                  <button onClick={() => setOrderToCancel(order.id)} className="col-span-2 text-[10px] font-bold text-slate-300 py-2 mt-2 hover:text-red-500 transition-colors uppercase tracking-widest"><Trash2 className="w-3 h-3 inline mr-1" /> Cancel Order</button>
+                </div>
+              </motion.div>
+            ))
+          )
         ) : (
-          <div className="space-y-6 pb-20">
-            {/* Reviews View */}
-            <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden"><div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" /><h3 className="text-sm font-bold text-slate-400 uppercase mb-2 tracking-widest">Average Happiness</h3><div className="flex items-end gap-3"><span className="text-5xl font-black text-yellow-400">{averageRating}</span><div className="pb-2"><StarRating rating={Math.round(Number(averageRating))} /><p className="text-xs font-bold text-slate-500 mt-1">{reviews.length} reviews</p></div></div></div>
-            <div className="space-y-4">{loadingReviews ? (<div className="text-center py-10 opacity-50 font-bold">Fetching Reviews...</div>) : reviews.length === 0 ? (<div className="text-center py-20 opacity-50"><MessageSquare className="w-12 h-12 mx-auto mb-2 text-slate-200" /><p className="font-bold text-slate-400">No reviews yet</p></div>) : (
-                reviews.map((r) => (<motion.div initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} key={r.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm"><div className="flex justify-between items-start mb-3"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center"><User className="w-5 h-5 text-slate-400" /></div><div><h4 className="font-black text-slate-900">{r.customer_name || "Guest"}</h4><p className="text-[10px] font-bold text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p></div></div><div className="bg-yellow-50 px-3 py-1 rounded-xl flex items-center gap-1 font-black text-yellow-600 text-sm">{r.rating}.0 <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" /></div></div><p className="text-sm font-bold text-slate-600 leading-relaxed italic border-l-2 border-slate-100 pl-4">"{r.comment}"</p></motion.div>))
-              )}</div>
-          </div>
+          processedMenuItems.map(item => (
+            <motion.div layout key={item.id} className={cx("bg-white p-4 rounded-2xl shadow-sm border flex justify-between items-center transition-all", !item.available ? "bg-slate-50/50 grayscale-sm border-slate-100" : "border-slate-100")}>
+              <div className="flex items-center gap-4">
+                <div className={cx("w-10 h-10 rounded-xl flex items-center justify-center font-black", item.category === 'Daily Specials' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-50 text-indigo-600')}>
+                  {item.category === 'Daily Specials' ? <Sparkles className="w-5 h-5" /> : item.name[0]}
+                </div>
+                <div>
+                  <h4 className={cx("font-bold text-slate-800", !item.available && "text-slate-400 line-through")}>{item.name}</h4>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-tighter">₹{item.price} • {item.category}</p>
+                </div>
+              </div>
+              <div className="flex flex-col items-center">
+                <button onClick={() => toggleStock(item.id, item.available)} className={cx("w-10 h-6 rounded-full p-1 transition-colors duration-200", item.available ? "bg-emerald-500" : "bg-slate-200")}>
+                  <div className={cx("w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200", item.available ? "translate-x-4" : "translate-x-0")} />
+                </button>
+                <span className="text-[7px] font-black mt-1 uppercase text-slate-400">{item.available ? "In Stock" : "Out"}</span>
+              </div>
+            </motion.div>
+          ))
         )}
       </div>
 
-      <div className="fixed bottom-6 left-0 right-0 px-4 flex justify-center z-40 pointer-events-none"><button onClick={() => setShowEndDayReport(true)} className="pointer-events-auto bg-white/90 backdrop-blur-md border border-slate-200 shadow-2xl px-6 py-3 rounded-full flex items-center gap-3 font-bold active:scale-95"><BarChart3 className="w-4 h-4 text-slate-900" /> End Day Report</button></div>
+      <div className="fixed bottom-6 left-0 right-0 px-4 flex justify-center z-30">
+        <button onClick={() => setShowEndDayReport(true)} className="bg-white/90 backdrop-blur-md border border-slate-200 shadow-2xl px-8 py-4 rounded-full flex items-center gap-3 font-black active:scale-95 transition-all text-slate-900"><BarChart3 className="w-5 h-5" /> END DAY SUMMARY</button>
+      </div>
 
-      <AnimatePresence>{showEndDayReport && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center px-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowEndDayReport(false)} /><motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl relative z-10">
-              <div className="bg-slate-900 p-8 text-white relative"><button onClick={() => setShowEndDayReport(false)} className="absolute top-6 right-6 p-2 bg-white/10 rounded-full"><X className="w-5 h-5" /></button><h2 className="text-2xl font-black mb-1">Daily Summary</h2><div className="mt-8 grid grid-cols-2 gap-4"><div className="bg-white/10 p-4 rounded-2xl backdrop-blur-md"><p className="text-xs font-bold text-slate-400 uppercase">Sales</p><p className="text-2xl font-black text-emerald-400 mt-1">₹{totalRevenue}</p></div><div className="bg-white/10 p-4 rounded-2xl backdrop-blur-md"><p className="text-xs font-bold text-slate-400 uppercase">Orders</p><p className="text-2xl font-black text-white mt-1">{orders.length}</p></div></div></div>
-              <div className="p-8"><div className="mb-6"><h3 className="text-sm font-black text-slate-900 uppercase mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-amber-500" /> Top Seller</h3><div className="bg-amber-50 p-4 rounded-2xl flex justify-between border border-amber-100"><span className="font-bold">{endDayStats.topItem.name}</span><span className="font-black text-amber-600">{endDayStats.topItem.count} Sold</span></div></div>
-                <div className="max-h-[150px] overflow-y-auto space-y-2 mb-8">{endDayStats.itemBreakdown.map((item, idx) => (<div key={idx} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded-lg"><span className="text-slate-600">{item.name}</span><span className="font-bold">{item.count}</span></div>))}</div>
-                
-                {/* --- END DAY BUTTON --- */}
-                <button onClick={handleEndDay} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-all">
-                  <RefreshCw className="w-4 h-4" /> CLOSE DAY & RESET
-                </button>
-              </div></motion.div></div>
-      )}</AnimatePresence>
-
-      <AnimatePresence>{orderToCancel && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setOrderToCancel(null)} />
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl relative z-10 text-center">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500 shadow-inner">
-                <AlertTriangle className="w-8 h-8" />
+      <AnimatePresence>
+        {showEndDayReport && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowEndDayReport(false)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-md rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl">
+              <div className="bg-slate-900 p-8 text-white">
+                <div className="flex justify-between items-start">
+                  <h2 className="text-2xl font-black tracking-tight">Sales Report</h2>
+                  <button onClick={() => setShowEndDayReport(false)} className="p-2 bg-white/10 rounded-full"><X className="w-4 h-4"/></button>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-8">
+                  <div className="bg-white/10 p-5 rounded-2xl"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Sales</p><p className="text-2xl font-black text-emerald-400 mt-1">₹{totalRevenue}</p></div>
+                  <div className="bg-white/10 p-5 rounded-2xl"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Order Count</p><p className="text-2xl font-black mt-1">{orders.length}</p></div>
+                </div>
               </div>
-              <h3 className="text-xl font-black text-slate-900 mb-2">Cancel Order?</h3>
-              <p className="text-sm font-medium text-slate-500 mb-8">This action will permanently remove the order from the list. It cannot be undone.</p>
-              <div className="grid grid-cols-2 gap-3 mt-8">
-                <button onClick={() => setOrderToCancel(null)} className="py-3 rounded-xl font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">Keep</button>
-                <button onClick={() => handleDeleteOrder(orderToCancel)} className="py-3 rounded-xl font-bold bg-red-500 text-white shadow-lg shadow-red-500/20 hover:bg-red-600 active:scale-95 transition-all">Yes, Cancel</button>
+              <div className="p-8">
+                <h3 className="text-xs font-black uppercase text-slate-400 mb-4 tracking-widest flex items-center gap-2"><TrendingUp className="w-4 h-4 text-amber-500" /> Bestseller</h3>
+                <div className="bg-amber-50/50 p-4 rounded-2xl flex justify-between border border-amber-100 mb-6">
+                  <span className="font-bold text-slate-800">{endDayStats.top.name}</span>
+                  <span className="font-black text-amber-600">{endDayStats.top.count} Sold</span>
+                </div>
+                <div className="max-h-40 overflow-y-auto mb-8 space-y-2 pr-2 custom-scrollbar">
+                  {endDayStats.list.map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-sm font-bold text-slate-500 border-b border-slate-50 pb-2"><span>{item.name}</span><span>{item.count}</span></div>
+                  ))}
+                </div>
+                <button onClick={handleEndDay} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-all"><RefreshCw className="w-4 h-4" /> RESET & ARCHIVE DAY</button>
               </div>
             </motion.div>
           </div>
-      )}</AnimatePresence>
+        )}
+
+        {orderToCancel && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setOrderToCancel(null)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-xs p-8 rounded-[2.5rem] text-center relative z-10 shadow-2xl">
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100"><AlertTriangle className="w-8 h-8 text-red-500" /></div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Cancel Order?</h3>
+              <p className="text-sm font-bold text-slate-400 mb-8 leading-relaxed">The customer will still see their history, but it will disappear from your live queue.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setOrderToCancel(null)} className="py-3 font-bold bg-slate-100 text-slate-600 rounded-xl">Keep</button>
+                <button onClick={handleCancelOrder} className="py-3 font-black bg-red-500 text-white rounded-xl shadow-lg shadow-red-500/30">Yes, Cancel</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
