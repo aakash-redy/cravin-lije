@@ -2,12 +2,22 @@ import { useState, useMemo, useEffect } from "react";
 import { 
   Clock, Trash2, RefreshCw, ChefHat, Coffee, X, Search, 
   BarChart3, TrendingUp, AlertTriangle, Plus, Leaf, Power, 
-  Star, Sparkles, MessageSquare, User, Pencil, Check, Lock, ChevronRight
+  Star, Sparkles, MessageSquare, User, Pencil, Check, Lock, ChevronRight, Settings
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // --- IMPORTANT: Points to src/lib/supabase.ts ---
 import { supabase } from "../lib/supabase"; 
+
+// --- SECURITY HELPER (Internal Hashing) ---
+async function hashPassword(plainText: string): Promise<string> {
+  if (!plainText) return "";
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plainText);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 // --- TYPESCRIPT INTERFACES ---
 interface OrderItem {
@@ -96,7 +106,7 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
   const [authError, setAuthError] = useState(false);
 
   const [orders, setOrders] = useState<Order[]>([]);
-  const [activeTab, setActiveTab] = useState<'orders' | 'menu' | 'reviews'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'menu' | 'reviews' | 'settings'>('orders');
   const [localMenuItems, setLocalMenuItems] = useState<MenuItem[]>([]); 
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
@@ -109,13 +119,33 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
   const [newItem, setNewItem] = useState({ name: "", price: "", category: "Chai", is_sugar_free_available: true });
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editPriceValue, setEditPriceValue] = useState("");
+  
+  // Settings State
+  const [newPassword, setNewPassword] = useState("");
+  const [passLoading, setPassLoading] = useState(false);
 
-  const handleLogin = (e?: React.FormEvent) => {
+  const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    
+    // 1. Check Hardcoded Fallback First
     if (inputPasscode === PASSCODE) {
       localStorage.setItem("cravin_admin_session", "active");
       setIsAuthenticated(true);
-    } else {
+      return;
+    }
+
+    // 2. Check Secure Database Password
+    try {
+      const hash = await hashPassword(inputPasscode);
+      const { data } = await supabase.from('restaurants').select('admin_password').single();
+      
+      if (data && data.admin_password === hash) {
+        localStorage.setItem("cravin_admin_session", "active");
+        setIsAuthenticated(true);
+      } else {
+        throw new Error("Invalid");
+      }
+    } catch (err) {
       setAuthError(true);
       setTimeout(() => setAuthError(false), 500);
       setInputPasscode("");
@@ -128,15 +158,31 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
     onBack();
   };
 
+  const handleUpdatePassword = async () => {
+    if (!newPassword) return alert("Please enter a password");
+    setPassLoading(true);
+    try {
+      const secureHash = await hashPassword(newPassword);
+      const { error } = await supabase.from('restaurants').update({ admin_password: secureHash }).eq('id', 1);
+      
+      if (error) throw error;
+      alert("Password updated securely! Please login again.");
+      handleLogout();
+    } catch (err) {
+      alert("Error updating password. Check console.");
+      console.error(err);
+    } finally {
+      setPassLoading(false);
+    }
+  };
+
   // --- 1. DATA ENGINE (Orders & Menu) ---
   const fetchData = async () => {
     if (!isAuthenticated) return;
     
-    // Fetch Active Orders
     const { data: ordersData } = await supabase.from('orders').select('*').neq('status', 'archived').order('created_at', { ascending: false });
     if (ordersData) setOrders(ordersData as Order[]);
 
-    // Fetch Menu Items
     const { data: menuData } = await supabase.from('menu_items').select('*').order('name');
     if (menuData) setLocalMenuItems(menuData as MenuItem[]);
   };
@@ -272,10 +318,11 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
             </div>
             <div className="text-right"><p className="text-xs text-slate-400 font-bold uppercase">Sales Today</p><p className="text-3xl font-black text-emerald-400">₹{totalRevenue}</p></div>
           </div>
-          <div className="flex gap-2 bg-slate-800/50 p-1.5 rounded-2xl backdrop-blur-sm">
-            <button onClick={() => setActiveTab('orders')} className={cx("flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><ChefHat className="w-4 h-4" /> Orders {orders.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{orders.length}</span>}</button>
-            <button onClick={() => setActiveTab('menu')} className={cx("flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Coffee className="w-4 h-4" /> Menu</button>
-            <button onClick={() => setActiveTab('reviews')} className={cx("flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2", activeTab === 'reviews' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><MessageSquare className="w-4 h-4" /> Reviews</button>
+          <div className="flex gap-2 bg-slate-800/50 p-1.5 rounded-2xl backdrop-blur-sm overflow-x-auto">
+            <button onClick={() => setActiveTab('orders')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><ChefHat className="w-4 h-4" /> Orders {orders.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{orders.length}</span>}</button>
+            <button onClick={() => setActiveTab('menu')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Coffee className="w-4 h-4" /> Menu</button>
+            <button onClick={() => setActiveTab('reviews')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'reviews' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><MessageSquare className="w-4 h-4" /> Reviews</button>
+            <button onClick={() => setActiveTab('settings')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'settings' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Settings className="w-4 h-4" /> Settings</button>
           </div>
         </div>
       </div>
@@ -330,10 +377,41 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
                   </motion.div>
             ))}</div>
           </div>
+        ) : activeTab === 'reviews' ? (
+          <div className="space-y-6 pb-20">
+            <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+              <button onClick={fetchReviews} disabled={loadingReviews} className="absolute top-6 right-6 p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+                <RefreshCw className={cx("w-4 h-4 text-white", loadingReviews && "animate-spin")} />
+              </button>
+              <h3 className="text-sm font-bold text-slate-400 uppercase mb-2 tracking-widest">Average Happiness</h3>
+              <div className="flex items-end gap-3"><span className="text-5xl font-black text-yellow-400">{averageRating}</span><div className="pb-2"><StarRating rating={Math.round(Number(averageRating))} /><p className="text-xs font-bold text-slate-500 mt-1">{reviews.length} reviews</p></div></div>
+            </div>
+            <div className="space-y-4">{loadingReviews ? (<div className="text-center py-10 opacity-50 font-bold">Fetching Reviews...</div>) : reviews.length === 0 ? (<div className="text-center py-20 opacity-50"><MessageSquare className="w-12 h-12 mx-auto mb-2 text-slate-200" /><p className="font-bold text-slate-400">No reviews yet</p></div>) : (reviews.map((r) => (<motion.div initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} key={r.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm"><div className="flex justify-between items-start mb-3"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center"><User className="w-5 h-5 text-slate-400" /></div><div><h4 className="font-black text-slate-900">{r.customer_name || "Guest"}</h4><p className="text-[10px] font-bold text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p></div></div><div className="bg-yellow-50 px-3 py-1 rounded-xl flex items-center gap-1 font-black text-yellow-600 text-sm">{r.rating}.0 <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" /></div></div><p className="text-sm font-bold text-slate-600 leading-relaxed italic border-l-2 border-slate-100 pl-4">"{r.comment}"</p></motion.div>)))}</div>
+          </div>
         ) : (
           <div className="space-y-6 pb-20">
-            <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden"><div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" /><h3 className="text-sm font-bold text-slate-400 uppercase mb-2 tracking-widest">Average Happiness</h3><div className="flex items-end gap-3"><span className="text-5xl font-black text-yellow-400">{averageRating}</span><div className="pb-2"><StarRating rating={Math.round(Number(averageRating))} /><p className="text-xs font-bold text-slate-500 mt-1">{reviews.length} reviews</p></div></div></div>
-            <div className="space-y-4">{loadingReviews ? (<div className="text-center py-10 opacity-50 font-bold">Fetching Reviews...</div>) : reviews.length === 0 ? (<div className="text-center py-20 opacity-50"><MessageSquare className="w-12 h-12 mx-auto mb-2 text-slate-200" /><p className="font-bold text-slate-400">No reviews yet</p></div>) : (reviews.map((r) => (<motion.div initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} key={r.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm"><div className="flex justify-between items-start mb-3"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center"><User className="w-5 h-5 text-slate-400" /></div><div><h4 className="font-black text-slate-900">{r.customer_name || "Guest"}</h4><p className="text-[10px] font-bold text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p></div></div><div className="bg-yellow-50 px-3 py-1 rounded-xl flex items-center gap-1 font-black text-yellow-600 text-sm">{r.rating}.0 <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" /></div></div><p className="text-sm font-bold text-slate-600 leading-relaxed italic border-l-2 border-slate-100 pl-4">"{r.comment}"</p></motion.div>)))}</div>
+            <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center"><Lock className="w-6 h-6 text-slate-400" /></div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900">Security</h3>
+                  <p className="text-xs font-bold text-slate-400">Manage your access</p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-wider mb-2">New Admin Password</label>
+                  <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Enter new secure password" className="w-full bg-slate-50 border-none p-4 rounded-xl font-bold outline-emerald-500 text-slate-900 placeholder:text-slate-300" />
+                </div>
+                <button onClick={handleUpdatePassword} disabled={passLoading} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                  {passLoading ? "UPDATING..." : "UPDATE PASSWORD"}
+                </button>
+                <p className="text-[10px] font-bold text-slate-400 text-center leading-relaxed">
+                  Note: This will encrypt your password using SHA-256 (Bank-Level Security).<br/>Once changed, you must login with the new password.
+                </p>
+              </div>
+            </div>
           </div>
         )}
       </div>
