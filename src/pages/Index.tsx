@@ -52,8 +52,8 @@ const MenuItemCard = ({ item, quantity, onAdd, onRemove }: {
       <div className="flex justify-between items-center w-full gap-3">
         
         {/* Left Side: Name, Price */}
-        <div className="flex flex-col flex-1">
-          <h4 className="font-bold text-base text-slate-900 leading-tight">{item.name}</h4>
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <h4 className="font-bold text-base text-slate-900 leading-tight truncate">{item.name}</h4>
           
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-base font-black text-slate-900">₹{item.price}</span>
@@ -94,11 +94,9 @@ const Index = () => {
   const location = useLocation(); 
   const { toast } = useToast();
 
-  // --- THE FIX IS HERE ---
-  // Initialize state by checking if they've already seen it this session
   const [showSplash, setShowSplash] = useState(() => {
     const hasSeenSplash = sessionStorage.getItem('hasSeenSplash');
-    return !hasSeenSplash; // If they haven't seen it, return true. If they have, return false.
+    return !hasSeenSplash;
   });
 
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -112,18 +110,13 @@ const Index = () => {
 
   // Splash Screen Timer
   useEffect(() => {
-    // If it's already false, do nothing
     if (!showSplash) return;
-
     const timer = setTimeout(() => {
       setShowSplash(false);
-      // Save to session storage so it doesn't run again on this tab!
       sessionStorage.setItem('hasSeenSplash', 'true');
     }, 2500); 
-    
     return () => clearTimeout(timer);
   }, [showSplash]);
-  // --- END OF FIX ---
 
   useEffect(() => {
     fetchMenu();
@@ -218,8 +211,8 @@ const Index = () => {
       <div className="min-h-screen bg-slate-50 pb-32 font-sans selection:bg-emerald-500/30">
         
         {/* HEADER LAYOUT */}
-        <div className="sticky top-0 z-40 bg-slate-50/95 backdrop-blur-xl pt-6 pb-4 px-4 shadow-sm border-b border-slate-200/60">
-          <div className="flex gap-2 items-center">
+        <div className="sticky top-0 z-40 bg-slate-50/95 backdrop-blur-xl pt-6 pb-4 shadow-sm border-b border-slate-200/60">
+          <div className="flex gap-2 items-center px-4">
             {/* Search Bar */}
             <div className="relative flex-1">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
@@ -233,14 +226,14 @@ const Index = () => {
             </div>
           </div>
 
-          {/* WRAPPED CHIPS */}
-          <div className="flex flex-wrap gap-2 mt-4">
+          {/* SCROLLABLE CHIPS */}
+          <div className="flex overflow-x-auto gap-2 mt-4 px-4 pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {categories.map((cat) => (
               <button
                 key={cat}
                 onClick={() => handleCategoryClick(cat)}
                 className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm",
+                  "px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm whitespace-nowrap shrink-0",
                   activeCategory === cat 
                     ? "bg-slate-900 text-white" 
                     : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
