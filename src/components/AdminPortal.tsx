@@ -9,6 +9,9 @@ import { motion, AnimatePresence } from "framer-motion";
 // --- IMPORTANT: Points to src/lib/supabase.ts ---
 import { supabase } from "../lib/supabase"; 
 
+// --- NEW: Import the audio file for the Admin Alert ---
+import alertSound from "@/assets/alert.mp3";
+
 // --- SECURITY HELPER (Internal Hashing) ---
 async function hashPassword(plainText: string): Promise<string> {
   if (!plainText) return "";
@@ -124,9 +127,20 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
   const [newPassword, setNewPassword] = useState("");
   const [passLoading, setPassLoading] = useState(false);
 
+  // --- THE AUDIO PRIME TRICK ---
+  // Call this function whenever the admin clicks anything to unlock the audio context
+  const primeAudioContext = () => {
+    const audio = new Audio(alertSound);
+    audio.volume = 0;
+    audio.play().catch(() => console.log("Silent prime skipped (normal behavior)"));
+  };
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
+    // Unlock Audio Context on Login!
+    primeAudioContext();
+
     // 1. Check Hardcoded Fallback First
     if (inputPasscode === PASSCODE) {
       localStorage.setItem("cravin_admin_session", "active");
@@ -192,7 +206,11 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
 
     const channel = supabase.channel('realtime-admin-all')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload: any) => {
-          new Audio('/ting.mp3').play().catch(() => {});
+          // --- PLAY THE ACTUAL LOUD SOUND HERE ---
+          const incomingAlert = new Audio(alertSound);
+          incomingAlert.volume = 1.0;
+          incomingAlert.play().catch(e => console.log("Audio blocked by browser (admin hasn't clicked yet)", e));
+          
           setOrders((prev) => [payload.new as Order, ...prev]);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, fetchData)
@@ -318,11 +336,13 @@ const AdminPortal = ({ onUpdateMenu, onBack }: AdminPortalProps) => {
             </div>
             <div className="text-right"><p className="text-xs text-slate-400 font-bold uppercase">Sales Today</p><p className="text-3xl font-black text-emerald-400">₹{totalRevenue}</p></div>
           </div>
+          
           <div className="flex gap-2 bg-slate-800/50 p-1.5 rounded-2xl backdrop-blur-sm overflow-x-auto">
-            <button onClick={() => setActiveTab('orders')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><ChefHat className="w-4 h-4" /> Orders {orders.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{orders.length}</span>}</button>
-            <button onClick={() => setActiveTab('menu')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Coffee className="w-4 h-4" /> Menu</button>
-            <button onClick={() => setActiveTab('reviews')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'reviews' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><MessageSquare className="w-4 h-4" /> Reviews</button>
-            <button onClick={() => setActiveTab('settings')} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'settings' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Settings className="w-4 h-4" /> Settings</button>
+            {/* Added primeAudioContext() to every tab switch! */}
+            <button onClick={() => { primeAudioContext(); setActiveTab('orders'); }} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'orders' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><ChefHat className="w-4 h-4" /> Orders {orders.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{orders.length}</span>}</button>
+            <button onClick={() => { primeAudioContext(); setActiveTab('menu'); }} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'menu' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Coffee className="w-4 h-4" /> Menu</button>
+            <button onClick={() => { primeAudioContext(); setActiveTab('reviews'); }} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'reviews' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><MessageSquare className="w-4 h-4" /> Reviews</button>
+            <button onClick={() => { primeAudioContext(); setActiveTab('settings'); }} className={cx("flex-1 py-3 px-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-fit", activeTab === 'settings' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400")}><Settings className="w-4 h-4" /> Settings</button>
           </div>
         </div>
       </div>
