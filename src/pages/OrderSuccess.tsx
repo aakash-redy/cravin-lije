@@ -5,22 +5,22 @@ import { Check, ArrowLeft, Star, ChefHat, BellRing, Utensils } from "lucide-reac
 import { motion, AnimatePresence } from "framer-motion";
 import Confetti from "react-confetti";
 
+// --- NEW: Import your audio file ---
+import notificationSound from "@/assets/audio.mp3"; 
+
 const OrderSuccess = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // We grab shopId here so we know exactly where to route back to!
   const { orderId, customerName, shopId } = location.state || {};
   
-  // 1. STATE: We track the LIVE status here
   const [status, setStatus] = useState(location.state?.status || 'sent');
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
 
-  // 2. REAL-TIME SUBSCRIPTION (The Magic)
+  // 1. REAL-TIME SUBSCRIPTION
   useEffect(() => {
     if (!orderId) return;
 
-    // Listen for changes ONLY to this specific order
     const channel = supabase
       .channel(`order-${orderId}`)
       .on(
@@ -29,10 +29,9 @@ const OrderSuccess = () => {
           event: 'UPDATE', 
           schema: 'public', 
           table: 'orders', 
-          filter: `id=eq.${orderId}` // Filter by ID so we don't get other people's updates
+          filter: `id=eq.${orderId}` 
         },
         (payload) => {
-          // Update the screen instantly when Admin changes status
           setStatus(payload.new.status);
         }
       )
@@ -42,6 +41,17 @@ const OrderSuccess = () => {
       supabase.removeChannel(channel);
     };
   }, [orderId]);
+
+  // --- NEW: THE "TING" FEATURE ---
+  useEffect(() => {
+    // Only play sound if the status is preparing or ready
+    if (status === 'preparing' || status === 'ready') {
+      const audio = new Audio(notificationSound);
+      // catch() is used because some browsers block autoplay unless the user has clicked something
+      audio.play().catch(err => console.log("Audio play blocked by browser:", err));
+    }
+  }, [status]);
+  // ------------------------------
 
   // Window resize handler for confetti
   useEffect(() => {
@@ -60,7 +70,6 @@ const OrderSuccess = () => {
 
   if (!orderId) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-400 font-bold">Redirecting...</div>;
 
-  // --- HELPER: Get Content based on Status ---
   const getStatusContent = () => {
     switch (status) {
       case 'preparing':
@@ -79,7 +88,7 @@ const OrderSuccess = () => {
           desc: "Please collect your order from the counter.",
           textColor: "text-emerald-600"
         };
-      default: // 'sent'
+      default: 
         return {
           icon: <Utensils className="w-10 h-10 text-emerald-400" />,
           color: "bg-slate-900 shadow-lg shadow-slate-900/20",
@@ -95,7 +104,6 @@ const OrderSuccess = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
       
-      {/* Show Confetti ONLY when Ready */}
       {status === 'ready' && (
         <Confetti
           width={windowSize.width}
@@ -109,9 +117,8 @@ const OrderSuccess = () => {
         layout
         className="w-full max-w-sm bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl relative z-10 text-center flex flex-col items-center"
       >
-        {/* DYNAMIC ICON AREA */}
         <motion.div 
-          key={status} // Animates when status changes
+          key={status} 
           initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className={`w-20 h-20 ${currentStatus.color} rounded-full flex items-center justify-center mx-auto mb-6 transition-colors duration-500`}
@@ -137,25 +144,14 @@ const OrderSuccess = () => {
           {currentStatus.desc}
         </motion.p>
 
-        {/* PROGRESS BAR */}
         <div className="w-full flex items-center justify-between px-2 mb-10 relative">
-          {/* Connecting Line */}
           <div className="absolute left-0 right-0 top-1/2 h-1.5 bg-slate-100 -z-10 rounded-full" />
-          
-          {/* Step 1: Sent */}
           <div className={`w-5 h-5 rounded-full z-10 border-4 border-white shadow-sm transition-all duration-500 ${['sent', 'preparing', 'ready'].includes(status) ? 'bg-emerald-500' : 'bg-slate-200'}`} />
-          
-          {/* Step 2: Preparing */}
           <div className={`w-5 h-5 rounded-full z-10 border-4 border-white shadow-sm transition-all duration-500 ${['preparing', 'ready'].includes(status) ? 'bg-emerald-500' : 'bg-slate-200'}`} />
-          
-          {/* Step 3: Ready */}
           <div className={`w-5 h-5 rounded-full z-10 border-4 border-white shadow-sm transition-all duration-500 ${status === 'ready' ? 'bg-emerald-500' : 'bg-slate-200'}`} />
         </div>
 
-        {/* DYNAMIC BUTTONS */}
         <div className="space-y-3 w-full">
-          
-          {/* RATE BUTTON - ONLY SHOWS WHEN READY */}
           <AnimatePresence>
             {status === 'ready' && (
               <motion.button 
@@ -172,7 +168,6 @@ const OrderSuccess = () => {
           </AnimatePresence>
 
           <button 
-            // THIS IS THE MAGIC LINE: Sends them back to the menu with the activeOrderId!
             onClick={() => navigate(`/${shopId || ''}`, { state: { activeOrderId: orderId } })}
             className="w-full bg-white border-2 border-slate-200 text-slate-700 font-black py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors active:scale-95"
           >
