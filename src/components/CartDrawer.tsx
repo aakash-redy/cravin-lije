@@ -3,6 +3,9 @@ import { X, Minus, Plus, ShoppingBag, Check, ChefHat, Trash2, MessageSquarePlus 
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
+// --- NEW: Import the audio file to prime it ---
+import notificationSound from "@/assets/audio.mp3"; 
+
 // --- Types ---
 interface CartItem {
   uniqueKey: string;
@@ -25,7 +28,7 @@ interface CartDrawerProps {
 
 const QUICK_TAGS = ["Less Sugar", "Strong", "No Milk", "Extra Hot", "Spicy"];
 
-// --- Helper Input Component (Isolated for Performance) ---
+// --- Helper Input Component ---
 const InstructionInput = ({ 
   value, 
   onChange, 
@@ -86,6 +89,15 @@ const CartDrawer = ({
 
   const handleSubmit = () => {
     if (!customerName.trim()) return;
+
+    // --- THE AUDIO PRIME FEATURE ---
+    // We play a silent version of the sound to "unlock" audio for the browser session.
+    const audio = new Audio(notificationSound);
+    audio.volume = 0; // Silent priming
+    audio.play()
+      .then(() => console.log("Audio unlocked for session"))
+      .catch((e) => console.log("Audio priming skipped", e));
+
     onPlaceOrder(customerName);
     onClose();
   };
@@ -179,7 +191,6 @@ const CartDrawer = ({
                         </div>
                       </div>
 
-                      {/* INSTRUCTIONS AREA */}
                       {isSingleItem && (
                         <div className="mt-4">
                           <div className="flex items-center gap-2 mb-2">
@@ -208,7 +219,6 @@ const CartDrawer = ({
                           </motion.div>
                         )}
                       </AnimatePresence>
-
                     </div>
                   ))}
                 </div>
@@ -225,8 +235,6 @@ const CartDrawer = ({
                   </div>
 
                   <div className="bg-slate-50 p-2.5 rounded-[1.5rem] border border-slate-100">
-                    
-                    {/* ENHANCED NAME INPUT START */}
                     <div className="w-full mb-3">
                       <input 
                         type="text" 
@@ -236,7 +244,6 @@ const CartDrawer = ({
                         className="w-full bg-white border-2 border-slate-300 rounded-xl py-4 px-5 text-center text-slate-900 font-black outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 transition-all shadow-sm text-xl"
                       />
                     </div>
-                    {/* ENHANCED NAME INPUT END */}
 
                     <button
                       onClick={handleSubmit}

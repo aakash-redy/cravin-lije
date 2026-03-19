@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Search, Plus, Minus, ShoppingBag, Utensils } from "lucide-react"; 
+import { Search, Plus, Minus, ShoppingBag, Utensils, X } from "lucide-react"; // <-- Added X icon
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate, useParams, useLocation } from "react-router-dom"; 
 import { motion, AnimatePresence } from "framer-motion";
@@ -108,6 +108,10 @@ const Index = () => {
 
   const activeOrderId = location.state?.activeOrderId; 
 
+  // --- NEW: BANNER STATES ---
+  const [showActiveBanner, setShowActiveBanner] = useState(!!activeOrderId);
+  const [bannerStatus, setBannerStatus] = useState('sent');
+
   // Splash Screen Timer
   useEffect(() => {
     if (!showSplash) return;
@@ -118,6 +122,30 @@ const Index = () => {
     return () => clearTimeout(timer);
   }, [showSplash]);
 
+  // --- NEW: BANNER SUPABASE LISTENER ---
+  useEffect(() => {
+    if (!activeOrderId) return;
+
+    const channel = supabase
+      .channel(`banner-sync-${activeOrderId}`)
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${activeOrderId}` },
+        (payload) => {
+          const newStatus = payload.new.status;
+          setBannerStatus(newStatus);
+          
+          // Auto-hide the banner if the order is completed or collected
+          if (newStatus === 'collected' || newStatus === 'completed') {
+            setShowActiveBanner(false);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeOrderId]);
+
+  // Menu Listener
   useEffect(() => {
     fetchMenu();
     const channel = supabase.channel('menu-updates').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'menu_items' }, (payload) => {
@@ -245,34 +273,63 @@ const Index = () => {
           </div>
         </div>
 
-        {/* ACTIVE ORDER BANNER */}
-        {activeOrderId && (
-          <motion.div 
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mx-4 mt-4 bg-emerald-50 border border-emerald-200 p-4 rounded-[1.25rem] flex items-center justify-between shadow-sm relative overflow-hidden"
-          >
-            {/* Soft background glow */}
-            <div className="absolute -right-4 -top-4 w-16 h-16 bg-emerald-200 blur-2xl rounded-full opacity-50 pointer-events-none"></div>
-            
-            <div className="flex items-center gap-4 relative z-10">
-              <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center shadow-md animate-pulse shrink-0">
-                <Utensils className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-wider">Active Order</span>
-                <span className="text-sm font-bold text-slate-900 leading-tight">Your food is in queue...</span>
-              </div>
-            </div>
-            
-            <button 
-              onClick={() => navigate('/order-success', { state: { orderId: activeOrderId, shopId } })} 
-              className="relative z-10 text-xs font-black bg-white px-4 py-2 rounded-lg border border-emerald-200 text-emerald-700 shadow-sm hover:bg-emerald-50 active:scale-95 transition-all shrink-0"
+        {/* --- DYNAMIC ACTIVE ORDER BANNER --- */}
+        <AnimatePresence>
+          {activeOrderId && showActiveBanner && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0, marginTop: 0 }}
+              className={cn(
+                "mx-4 mt-4 p-4 rounded-[1.25rem] flex items-center justify-between shadow-sm relative overflow-hidden border",
+                bannerStatus === 'ready' ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"
+              )}
             >
-              View
-            </button>
-          </motion.div>
-        )}
+              {/* Soft background glow */}
+              <div className={cn(
+                "absolute -right-4 -top-4 w-16 h-16 blur-2xl rounded-full opacity-50 pointer-events-none",
+                bannerStatus === 'ready' ? "bg-amber-200" : "bg-emerald-200"
+              )}></div>
+              
+              <div className="flex items-center gap-4 relative z-10">
+                <div className={cn(
+                  "w-10 h-10 rounded-full flex items-center justify-center shadow-md animate-pulse shrink-0",
+                  bannerStatus === 'ready' ? "bg-amber-500" : "bg-emerald-500"
+                )}>
+                  <Utensils className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex flex-col">
+                  <span className={cn(
+                    "text-[10px] font-black uppercase tracking-wider",
+                    bannerStatus === 'ready' ? "text-amber-600" : "text-emerald-600"
+                  )}>
+                    {bannerStatus === 'ready' ? "Order Ready!" : "Active Order"}
+                  </span>
+                  <span className="text-sm font-bold text-slate-900 leading-tight">
+                    {bannerStatus === 'ready' ? "Collect from counter" : "Your food is in queue..."}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex gap-2 relative z-10 items-center">
+                <button 
+                  onClick={() => navigate('/order-success', { state: { orderId: activeOrderId, shopId, status: bannerStatus } })} 
+                  className={cn(
+                    "text-xs font-black bg-white px-4 py-2 rounded-lg border shadow-sm active:scale-95 transition-all shrink-0",
+                    bannerStatus === 'ready' ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                  )}
+                >
+                  View
+                </button>
+                {bannerStatus === 'ready' && (
+                  <button onClick={() => setShowActiveBanner(false)} className="w-8 h-8 flex items-center justify-center bg-slate-900 text-white rounded-lg active:scale-95 transition-all shrink-0 shadow-sm">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* MENU ITEMS GRID */}
         <div className="p-4 space-y-6 mt-2 min-h-[50vh]">
